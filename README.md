@@ -11,7 +11,6 @@ Node.js Backend Engineering Bootcamp — project briefs, shared standards and re
 
 ### Project 1 — Online Exam Platform
 - [`requirements.md`](./project-1-online-exam/requirements.md) — project brief
-- [`feedback/`](./project-1-online-exam/feedback/) — per-team code review results
 
 ### Project 2 — DOCURA
 - [`requirements.md`](./project-2-docura/requirements.md) — business requirements, rules, edge cases and design challenges
