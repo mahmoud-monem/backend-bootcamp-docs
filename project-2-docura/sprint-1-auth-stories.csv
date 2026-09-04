@@ -1,0 +1,286 @@
+"Issue Type","Issue Key","Summary","Description","Acceptance Criteria","Priority","Labels","Story Points","Epic Name","Epic Link","Component","Sprint"
+"Epic","AUTH-0","AUTH — Authentication & Account Access","The complete authentication cycle for DOCURA: guest access, registration with phone
+verification, sign in by email or phone plus Google and Apple, password recovery,
+session handling, and the promotion of a guest into a registered account.
+
+Source of truth: the Figma auth screens, plus sections 3, 4 (Module 1), 5.1 and 6.1
+of the project requirements document.
+
+Scope note: this epic is backend only. Booking, payment and the catalogue come later,
+but this epic decides who is allowed to reach them.","- A visitor can use the app as a guest and is stopped only where an account is genuinely required.
+- A new user can register, verify their phone, and reach the point of booking.
+- A returning user can sign in with email, phone, Google or Apple, and stays signed in.
+- A user who forgot their password can recover it and is signed out everywhere afterwards.
+- A guest who registers keeps their searches and returns to the slot they were booking.
+- Every rule in the stories is enforced by the server, and every listed edge case has a defined behavior.","Highest","auth,sprint-1","8","AUTH — Authentication & Account Access","","Backend","Sprint 1"
+"Story","AUTH-1","Guest access — use the app without an account","*User story*
+As a first-time visitor
+I want to explore the app without creating an account
+So that I can judge whether it is worth signing up
+
+*User flow (see Figma)*
+Splash screen -> Landing screen (Sign up / Sign in / Google / Apple / ""Continue as guest?"")
+-> user taps ""Continue as guest?"" -> Home screen loads with browsing enabled.
+
+From here the guest can: browse Home, open Categories, search and filter doctors,
+open a doctor profile and see availability, read medical articles, and use the AI assistant.
+
+The moment the guest tries to book, favorite a doctor, or open My Bookings,
+the app must send them to Sign in / Sign up (see AUTH-2 and AUTH-3).
+
+*Rules and validations*
+- Guest identity: A guest gets an identity tied to their device, so their activity (recent searches, AI conversation) belongs to them and can later be carried into a real account.
+- Allowed for guests: Home, specialties, search + suggestions, filters, sorting, doctor profiles, availability, map, articles, and the AI assistant at 10 messages per day per device (BR-09).
+- Blocked for guests: Booking, holding a slot, payment, saved cards, favorites, My Bookings, notifications, ask-a-doctor, and reading any personal data.
+- Deny by default: Any endpoint that has not explicitly been opened to guests must reject them. A newly added endpoint is never accidentally public.
+- No leaks: A blocked request must not reveal whether the underlying record exists.
+
+*Domain events to publish*
+- A guest session was started (used for analytics and for migration in AUTH-6).
+
+*Edge cases to handle*
+- The same device is reused after the user already has an account.
+- The guest identity is lost (app reinstalled) — the user simply starts fresh; nothing crashes.
+- A guest identity is presented alongside a signed-in user's credentials — which one wins?","- Given a fresh install, when the user taps 'Continue as guest?', then they reach Home and can browse without an account.
+- Given a guest, when they search, filter, sort and open a doctor profile with availability, then everything works exactly as it does for a signed-in user.
+- Given a guest, when they try to book, favorite a doctor, or open My Bookings, then the request is rejected and the app is told to send them to sign in.
+- Given a guest, when they use the AI assistant, then it works up to 10 messages per day per device and never reaches appointment data (BR-09).
+- Given a new endpoint added later with no explicit guest permission, when a guest calls it, then it is rejected (this is proven by a test, not by convention).
+- Given a guest, when their activity is recorded (recent searches, AI conversation), then it is attached to their device identity so AUTH-6 can migrate it.","Highest","auth,guest,sprint-1","3","","AUTH — Authentication & Account Access","Backend","Sprint 1"
+"Story","AUTH-2","Registration and phone verification","*User story*
+As a new patient
+I want to create an account and confirm my phone number
+So that I can book appointments and receive confirmations and reminders
+
+*User flow (see Figma)*
+Landing -> ""Sign up"" -> Sign up form (Name, Email, Phone, Gender, Password, Confirm Password)
+-> ""Sign Up"" -> Verify Your Mobile Number screen:
+   ""Please Enter The 4 Digit Code Sent To +20**********""  with  ""Code Expires in: 03:00""
+-> user enters the 4-digit code -> account is verified and the user is signed in.
+
+On the verification screen the user can request a new code (""Resend Code"").
+Alternative entry: the user taps Google or Apple on the Landing screen (see AUTH-3).
+
+*Rules and validations*
+- Required fields: Name, Email, Phone, Gender (Male or Female — exactly one), Password, Confirm Password. None may be blank.
+- Email: Valid format. Must be unique across all accounts. Case must not matter: M@Example.com and m@example.com are the same person.
+- Phone: Valid Egyptian mobile number. Must be unique across all accounts. Different notations of the same number (01001234567 and +201001234567) are the SAME number and must collide.
+- Password: At least 8 characters, mixing letters, numbers and symbols. Design message: ""Password is too weak. Please use at least 8 characters, including a mix of letters, numbers, and symbols.""
+- Confirm password: Must match the password exactly.
+- Duplicate reporting: If both the email and the phone are already registered, BOTH errors are returned in one response — the design shows ""This email is already registered"" and ""This phone number is already registered"" at the same time.
+- Password storage: Passwords are stored hashed. The plain password never appears in a database column, a log, or an error message.
+- Verification code: 4 digits, valid for 3 minutes, single-use, and valid only for phone verification — a password-reset code must never verify a phone.
+- Code delivery: The code is sent by SMS. Sending happens outside the registration request: if the SMS provider is down, registration still succeeds and delivery is retried.
+- Code secrecy: The code is never returned in an API response. The response shows only the masked destination.
+- Wrong codes: Wrong attempts are counted. After 5 wrong attempts the code is dead and the user must request a new one, even if they then type the right digits (BR-08).
+- Resend: Resending issues a NEW code and immediately invalidates the previous one. A resend is allowed only after 60 seconds, at most 3 times per code and 5 times per hour for the same phone, because each SMS costs real money (BR-08).
+- Unverified accounts: An account exists before verification, but it cannot book anything until the phone is verified.
+
+*Domain events to publish*
+- An account was registered.
+- A verification code was issued (consumed by the SMS sender).
+- A phone number was verified.
+
+*Edge cases to handle*
+- A user registers, never verifies, then registers again a week later with the same email — resend, do not create a second account.
+- Two devices request codes for the same phone at the same time.
+- The user requests a new code, then enters the OLD one that just arrived by SMS.
+- Someone scripts the resend endpoint to burn the SMS budget.","- Given a valid form, when the user submits, then the account is created unverified and a 4-digit code is sent to the phone, and the response shows only the masked number and the expiry.
+- Given an email that is already registered and a phone that is already registered, when the user submits, then the response contains BOTH errors at once, one per field.
+- Given an email that differs only in letter case from an existing account, when the user submits, then it is rejected as already registered.
+- Given a phone written as 01001234567 and an existing account stored as +201001234567, when the user submits, then it is rejected as already registered.
+- Given a password of 7 characters, or one with no digits, or one with no symbols, when the user submits, then it is rejected with the weak-password message from the design.
+- Given a confirm password that does not match, when the user submits, then it is rejected on that field.
+- Given a correct code entered within 3 minutes, when the user submits it, then the phone is verified and the user is signed in.
+- Given a code entered after 3 minutes, when the user submits it, then it is rejected as expired and the user is told to request a new one.
+- Given a code that has already been used once, when the user submits it again, then it is rejected.
+- Given a code issued for password reset, when the user submits it on the phone-verification screen, then it is rejected.
+- Given the user taps Resend, when a new code is issued, then the previous code no longer works.
+- Given the user taps Resend again within 60 seconds, when the request arrives, then it is refused with a retry hint and NO SMS is sent.
+- Given the SMS provider is unavailable, when the user registers, then registration still succeeds and the message is retried in the background.
+- Given an unverified account, when it tries to reach booking, then it is refused and told the phone is not verified.
+- Given any registration attempt, when it is processed, then no password and no code appears in any log.","Highest","auth,registration,otp,sprint-1","8","","AUTH — Authentication & Account Access","Backend","Sprint 1"
+"Story","AUTH-3","Sign in with email or phone, Google or Apple","*User story*
+As a returning patient
+I want to sign in with whichever identifier I remember, or with Google or Apple
+So that I can get back into my account quickly
+
+*User flow (see Figma)*
+Landing -> ""Sign in"" -> Sign in screen:
+  one identifier field (email OR phone), a password field with show/hide,
+  ""Forget Password?"" (see AUTH-4), and Google / Apple buttons under an ""Or"" divider.
+-> successful sign in -> Home, with the user's name in the greeting.
+
+The design shows three separate error states: ""Incorrect Password"",
+""Invalid Phone Number"", and ""Invalid email address"".
+
+*Rules and validations*
+- One field, two identifiers: The single identifier field accepts an email or a phone number; the system decides which it is.
+- Normalization: The identifier is normalized the same way as at registration (lowercase email, canonical phone) before lookup.
+- Format errors: A malformed email or a malformed phone is a format error and is reported on the field, matching the design's copy.
+- Wrong credentials: A well-formed identifier that does not exist and a correct identifier with a wrong password must produce the SAME response — never reveal which accounts exist.
+- Unverified accounts: A user whose phone is not verified may sign in, but the response must tell the app to route them to phone verification, and booking stays blocked.
+- Brute force: 10 failed sign-ins lock the account for 15 minutes (BR-08). A successful sign-in resets the counter.
+- Google / Apple: The token from the provider is verified by the backend against the provider before any account is created or matched. A token the backend has not verified is never trusted.
+- Account matching: A returning social user must land on the SAME account, not a new one each time.
+- Linking: If the social account's verified email already belongs to an existing account, link to it rather than creating a duplicate.
+- Missing profile data: Google and Apple do not supply a phone number or gender. The user is signed in and can browse and use the AI assistant, but the response flags the profile as incomplete: a verified phone is required before their FIRST BOOKING, not at sign-up (BR-07).
+- Apple specifics: Apple returns the user's name only on the very first authorization — capture it then. A private-relay email is treated as a normal unique email.
+- Staying signed in: After signing in, the user stays signed in across app restarts without retyping a password, and can sign out. Signing out on one device does not sign them out everywhere unless they ask for it.
+
+*Domain events to publish*
+- A user signed in.
+- A sign-in attempt failed.
+- An account was locked.
+- A user signed in through a social provider.
+
+*Edge cases to handle*
+- The same person has a password account and a Google account with the same email.
+- An Apple private-relay address versus the user's real address.
+- A user is signed in on two devices and changes their password on one.
+- The provider's verification service is unreachable — social sign-in must fail cleanly, never fall back to trusting the token.","- Given a registered email and the correct password, when the user signs in, then they are signed in and stay signed in after restarting the app.
+- Given a registered phone and the correct password, when the user signs in, then they are signed in.
+- Given a malformed email, when the user signs in, then the error matches the design's 'Invalid email address' state.
+- Given a malformed phone, when the user signs in, then the error matches the design's 'Invalid Phone Number' state.
+- Given a correct identifier and a wrong password, when the user signs in, then the response is identical in shape and timing to an identifier that does not exist at all.
+- Given 10 consecutive wrong passwords, when the user tries again, then the account is locked for 15 minutes and the response says so.
+- Given a locked account, when the 15 minutes pass, then the user can sign in again.
+- Given an unverified account with correct credentials, when the user signs in, then the response tells the app to route to phone verification and booking remains blocked.
+- Given a valid Google token, when the user signs in for the first time, then an account is created and they are signed in.
+- Given the same Google account signing in a second time, when they sign in, then they land on the SAME account, not a new one.
+- Given a Google or Apple token that is expired, tampered with, or issued for a different app, when it is submitted, then it is rejected.
+- Given an Apple sign-in whose verified email matches an existing verified account, when they sign in, then the accounts are linked instead of duplicated.
+- Given a social user with no phone number, when they sign in, then they can browse and use the AI assistant, the response flags the profile as incomplete, and only booking is blocked until a verified phone exists.
+- Given a signed-in user, when they sign out, then their session no longer works, and other devices are unaffected unless 'sign out everywhere' was chosen.","Highest","auth,login,social,sprint-1","5","","AUTH — Authentication & Account Access","Backend","Sprint 1"
+"Story","AUTH-4","Forgot password — recover by phone or email","*User story*
+As a patient who forgot my password
+I want to reset it using my phone or my email
+So that I can get back into my account without contacting support
+
+*User flow (see Figma)*
+Sign in -> ""Forget Password?"" -> Choose method screen:
+   ""Choose Your phone or email to reset password""
+-> user picks a channel -> enters the phone or the email
+-> Enter Verification Code screen:
+   ""We Have Sent Code To mohsen1@gmail.com"",
+   ""Didn't You Receive Any Code? Resend Code"",  ""Code Expires in: 03:00""
+-> Create New Password screen:
+   ""Set a strong password To Keep your account Secure""  (password + confirm)
+-> Confirmation screen: ""Password Changed! Your Password Has Been Changed Successfully""
+-> user returns to Sign in and signs in with the new password.
+
+*Rules and validations*
+- Channel choice: The user chooses phone or email; the code is delivered on the chosen channel only.
+- No account enumeration: The response is identical whether or not the target is registered — same body, same timing. This screen must never become a tool for discovering which emails or phones have accounts.
+- Code rules: Same as registration: 4 digits, 3 minutes, single-use, and scoped to password reset only.
+- Resend: Same throttling as registration; a new code invalidates the previous one.
+- Password rules: The new password must satisfy the same strength rules as registration, and must match its confirmation.
+- Session invalidation: After a successful reset, every existing session for that account is terminated — a stolen or lost device is signed out.
+- Single use: The permission gained by entering the code can be used exactly once, and expires quickly if the user abandons the flow.
+- Notification: The user is told their password changed, on their verified channel.
+- Reuse of old password: The new password must be different from the current one; reusing it is rejected on the password field.
+
+*Domain events to publish*
+- A password reset was requested.
+- A reset code was issued.
+- A password was changed (consumed by the notification sender and the session terminator).
+
+*Edge cases to handle*
+- The user requests recovery on both channels and receives two codes.
+- The user completes the reset in one app while still signed in on another device.
+- An attacker requests recovery for someone else's email — the real owner must be able to tell that they did not ask for it.
+- The user abandons the flow after entering the code and returns an hour later.","- Given a registered email, when the user requests recovery by email, then a reset code is sent to that email.
+- Given a registered phone, when the user requests recovery by phone, then a reset code is sent by SMS.
+- Given an email or phone that is NOT registered, when the user requests recovery, then the response is identical to the registered case and nothing is sent.
+- Given a correct code within 3 minutes, when the user submits it, then they may proceed to set a new password.
+- Given an expired or already-used code, when the user submits it, then it is rejected and they must request a new one.
+- Given a reset code, when it is submitted on the phone-verification screen instead, then it is rejected.
+- Given a weak new password, when it is submitted, then it is rejected with the same message as registration, and the reset permission is NOT consumed — the user can try again.
+- Given a new password that does not match its confirmation, when it is submitted, then it is rejected on that field.
+- Given a new password identical to the current one, when it is submitted, then it is rejected and the reset permission is not consumed.
+- Given a successful reset, when it completes, then the user can sign in with the new password and cannot sign in with the old one.
+- Given a successful reset, when it completes, then every other device that was signed in is signed out.
+- Given a successful reset, when the user tries to reuse the same reset permission a second time, then it is refused.
+- Given more than 5 recovery requests in an hour for the same target, when another arrives, then it is refused with a retry hint and nothing is sent.","Highest","auth,password-reset,sprint-1","5","","AUTH — Authentication & Account Access","Backend","Sprint 1"
+"Story","AUTH-5","Staying signed in, signing out, and protecting the session","*User story*
+As a signed-in patient
+I want to stay signed in between app launches and to sign out when I choose
+So that I do not retype my password constantly, and I stay in control of my account
+
+*User flow (see Figma)*
+This story has no dedicated screen — it is what makes every other screen work.
+
+After registration (AUTH-2), sign in (AUTH-3) or password reset (AUTH-4),
+the app holds a credential that keeps the user signed in. It renews itself quietly
+while the user browses. The user can sign out, and can be signed out by a password reset.
+
+Access levels the rest of the system depends on:
+  guest  <  signed in but phone not verified  <  fully verified user
+
+*Rules and validations*
+- Short-lived access: The credential used on every request is short-lived, so a leaked one stops working quickly.
+- Silent renewal: A longer-lived credential renews the short one without asking the user for a password.
+- Rotation: Each renewal replaces the long-lived credential. The previous one stops working.
+- Theft detection: If a credential that was already replaced is presented again, treat it as theft: kill that whole chain of sessions and record it.
+- Storage: Long-lived credentials are stored in a way that a database leak does not hand an attacker working sessions.
+- Access levels: The credential carries the user's level (guest / unverified / verified). Booking requires verified. Guards enforce this in one place, not endpoint by endpoint.
+- Sign out: Signing out ends the current session only. 'Sign out everywhere' ends them all.
+- Forced sign-out: A password reset ends every session (AUTH-4).
+- Ownership: Every request for personal data is checked against the owner of the session. Another user's record answers as if it does not exist.
+
+*Domain events to publish*
+- A session was created.
+- A session was ended.
+- Suspected credential reuse was detected.
+
+*Edge cases to handle*
+- The app renews from two screens at the same moment — one renewal must not invalidate the other user's own session by accident.
+- The device clock is wrong.
+- The user is mid-payment when their credential expires.
+- A user is signed in on five devices and resets their password.","- Given a signed-in user, when they close and reopen the app, then they are still signed in without retyping a password.
+- Given an expired short-lived credential, when the app renews it, then the user continues without interruption.
+- Given a renewal, when it completes, then the previous long-lived credential no longer works.
+- Given a long-lived credential that was already replaced, when it is presented again, then every session in that chain is terminated and the event is recorded.
+- Given a user who signs out, when they retry any protected request, then it is refused.
+- Given a user who chooses 'sign out everywhere', when they do, then every device is signed out.
+- Given a password reset, when it completes, then all sessions are gone (verified together with AUTH-4).
+- Given an unverified user, when they call a booking endpoint, then it is refused because of their access level, not because of a check inside the booking code.
+- Given user A's session, when they request user B's appointment, then the answer is 'not found'.
+- Given the credential store, when it is inspected, then no long-lived credential is readable in a usable form.","High","auth,session,security,sprint-1","5","","AUTH — Authentication & Account Access","Backend","Sprint 1"
+"Story","AUTH-6","Guest becomes a registered user without losing anything","*User story*
+As a guest who has been searching for a doctor
+I want my searches and my chosen appointment slot to survive when I create an account
+So that signing up does not cost me the work I already did
+
+*User flow (see Figma)*
+A guest browses and searches, then picks a doctor and a time slot and taps to book.
+Because booking needs an account, the app sends them to Sign up or Sign in.
+They register (AUTH-2) or sign in (AUTH-3) with their guest identity still attached.
+
+After authentication they must land back on EXACTLY the slot they were about to book,
+with their recent searches intact.
+
+This is the point where the whole 'guest-first' idea either works or is a lie.
+
+*Rules and validations*
+- Carry the identity: The guest identity travels with the registration or sign-in request, so the system knows which guest became which user.
+- Migrate the context: Guest-owned data — recent searches and AI conversations — becomes owned by the account.
+- Merge, never overwrite: An existing user signing in on a guest device keeps their own history AND gains the guest's, with duplicates removed.
+- Resume the intent: Whatever the guest was trying to do (this doctor, this clinic, this date, this time) is returned so the app can continue the booking exactly where it stopped.
+- Safe to repeat: If the migration runs twice — a retry, a flaky network — nothing is duplicated.
+- Nothing is stolen: A guest identity that already belongs to another account is not silently re-attached. Decide the behavior and document it.
+- Event-driven: The migration is a good first exercise in reacting to an event rather than writing it into the registration code.
+
+*Domain events to publish*
+- A guest was promoted to a registered account (consumed by whatever migrates search history and conversations).
+
+*Edge cases to handle*
+- The slot the guest wanted was booked by someone else while they were registering.
+- The guest registers on a phone whose identity was cleared mid-flow.
+- Two guests on the same shared device register one after the other.","- Given a guest with recent searches, when they register, then those searches appear in their new account.
+- Given an existing user with their own history who signs in on a guest device, when they sign in, then both histories are present and duplicates appear once.
+- Given a guest with an AI conversation, when they register, then the conversation is still readable afterwards.
+- Given a guest who was booking a specific slot, when they finish registering, then the response tells the app which doctor, clinic, date and time to return to.
+- Given the migration runs twice for the same guest, when it completes, then no data is duplicated.
+- Given a guest identity already attached to a different account, when it is presented at registration, then the documented behavior happens and nothing from the other account is exposed.
+- Given the migration fails, when it does, then the account is still created and signed in — the user is never blocked by a failed migration.","High","auth,guest,events,sprint-1","5","","AUTH — Authentication & Account Access","Backend","Sprint 1"
