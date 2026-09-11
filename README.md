@@ -14,8 +14,9 @@ Node.js Backend Engineering Bootcamp — project briefs, shared standards and re
 
 ### Project 2 — DOCURA
 - [`requirements.md`](./project-2-docura/requirements.md) — business requirements, rules, edge cases and design challenges
-- [`sprint-1-auth-stories.md`](./project-2-docura/sprint-1-auth-stories.md) — Sprint 1 user stories (authentication cycle)
-- [`sprint-1-auth-stories.csv`](./project-2-docura/sprint-1-auth-stories.csv) — the same stories, ready to import into Jira
+- [`sprint-1-auth-stories.md`](./project-2-docura/sprint-1-auth-stories.md) — Sprint 1 user stories: authentication cycle
+- [`sprint-2-catalog-stories.md`](./project-2-docura/sprint-2-catalog-stories.md) — Sprint 2 user stories: home, search and filters
+- Each sprint also ships a `.csv` of the same stories, ready to import into Jira
 
 ## Shared across projects
 
