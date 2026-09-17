@@ -22,3 +22,5 @@ Node.js Backend Engineering Bootcamp — project briefs, shared standards and re
 
 - [`standards/`](./standards/) — the rule catalogs code is reviewed against (clean code, TypeScript, Jest, RESTful API)
 - [`design-patterns-session.md`](./design-patterns-session.md) — design patterns session material
+- [`git-github-guide.md`](./git-github-guide.md) — git, GitHub and version control handbook: commits, branching, pull requests, code review, releases
+- [`readme-guide.md`](./readme-guide.md) — README handbook: what belongs in a README, and how to design and document the repo's coding style guide
