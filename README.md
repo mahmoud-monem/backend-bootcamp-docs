@@ -14,10 +14,15 @@ Node.js Backend Engineering Bootcamp — project briefs, shared standards and re
 
 ### Project 2 — DOCURA
 - [`requirements.md`](./project-2-docura/requirements.md) — business requirements, rules, edge cases and design challenges
-- [`sprint-1-auth-stories.md`](./project-2-docura/sprint-1-auth-stories.md) — Sprint 1 user stories: authentication cycle
-- [`sprint-2-catalog-stories.md`](./project-2-docura/sprint-2-catalog-stories.md) — Sprint 2 user stories: home, search and filters
-- [`sprint-3-booking-stories.md`](./project-2-docura/sprint-3-booking-stories.md) — Sprint 3 user stories: booking, payment and appointment history
-- Each sprint also ships a `.csv` of the same stories, ready to import into Jira
+
+Four sprints of user stories, each with a `.csv` of the same stories ready to import into Jira:
+
+| Sprint | Stories | Points | Covers |
+|---|---|---|---|
+| [1 — Authentication](./project-2-docura/sprint-1-auth-stories.md) | 6 | 31 | Guest access, registration, OTP, sign-in, recovery, sessions |
+| [2 — Discovery](./project-2-docura/sprint-2-catalog-stories.md) | 7 | 36 | Catalogue, home, search, filters, sorting, map, favourites |
+| [3 — Booking](./project-2-docura/sprint-3-booking-stories.md) | 8 | 47 | Availability, slot holds, cards, payment, history, cancellation, reschedule, scheduled work |
+| [4 — Engagement](./project-2-docura/sprint-4-engagement-stories.md) | 7 | 34 | Notifications, ask a doctor, AI assistant, safety, prescriptions, go-live |
 
 ## Shared across projects
 
