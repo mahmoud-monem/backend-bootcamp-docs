@@ -233,6 +233,34 @@ requirement.
 
 ---
 
+### RS-105 — Mutating financial or booking operation without Idempotency-Key support
+**Severity:** major · **Applies to:** `*.routes.ts`, `*.controller.ts` on mutating paths (`POST /bookings`, `POST /payments`)
+**Detect:** Endpoints handling payments, reservations, slot holds, or refund requests that do not inspect an `Idempotency-Key` or `X-Idempotency-Key` header or payload idempotency token.
+Grep hint: `@Post\(['"](bookings|payments|checkout|refunds|holds)` without checking `idempotency-key` in headers or DTO.
+
+```ts
+// Bad — mobile network retry results in duplicate booking or double charge
+@Post('checkout')
+async checkout(@Body() dto: CheckoutDto) {
+  return this.paymentService.processCharge(dto);
+}
+
+// Good — check idempotency key header and return cached result if already seen
+@Post('checkout')
+async checkout(
+  @Headers('idempotency-key') idempotencyKey: string,
+  @Body() dto: CheckoutDto,
+) {
+  if (!idempotencyKey) throw new BadRequestException('Idempotency-Key header is required');
+  return this.paymentService.processIdempotentCharge(idempotencyKey, dto);
+}
+```
+
+**Why:** Mobile and flaky networks frequently drop connections before receiving the HTTP 201 response. Without an idempotency key, automated client retries trigger duplicate credit card transactions or double bookings.
+**Not a violation when:** The operation is safe and idempotent by HTTP definition (e.g. `GET`, `PUT`, `DELETE`).
+
+---
+
 ## RS-2xx — Status codes
 
 ### RS-201 — Success status does not match the operation
@@ -448,7 +476,7 @@ res.status(404).json({ success: false, error: { code: 'QUIZ_NOT_FOUND', message:
 ```
 
 **Why:** Clients unwrap responses in one place. Every extra shape is a branch in their code
-and a bug when a new endpoint picks a fourth.
+and a bug when a new endpoint picks a fourth. In NestJS applications, standard handler returns and default framework exceptions do not match this contract out-of-the-box; developers must register a global `ResponseInterceptor` and `HttpExceptionFilter` to guarantee uniform envelopes.
 **Not a violation when:** A documented exception exists (file download, health probe).
 
 ---
@@ -507,13 +535,15 @@ response type is explicit.
 
 ---
 
-### RS-405 — Correct answers exposed before submission
-**Severity:** critical · **Applies to:** `modules/quiz/**`, `modules/attempt/**`
-**Detect:** A start-attempt or quiz-detail response that includes `isCorrect`,
-`correctAnswer`, or `correctOptionIds`; an admin-shaped payload reused on a student route.
+### RS-405 — Premature disclosure of withheld domain state
+**Severity:** critical · **Applies to:** controllers, response mappers
+**Detect:** Returning data that must remain withheld until a state transition occurs (e.g. quiz correct options before attempt submission; doctor personal phone numbers or direct clinic contracts; internal clinician evaluation notes).
 
 ```ts
-// Good
+// Bad — returns questions with answers before exam is submitted
+questions: questions.map((q) => ({ id: q._id, text: q.text, correctOptionIds: q.correctOptionIds }));
+
+// Good — strips answers until submission completes
 questions: questions.map((question) => ({
   id: question._id,
   text: question.text,
@@ -522,10 +552,8 @@ questions: questions.map((question) => ({
 })),
 ```
 
-**Why:** Project-specific and non-negotiable — brief §4 M3: *"Return questions to the user
-without revealing the correct options."* Leaking the answer key defeats the product.
-**Not a violation when:** The route is admin-only *and* the authorization is enforced at the
-router, and the response type is named for that (`AdminQuizResponse`).
+**Why:** Leaking withheld domain data breaks product security (e.g., student cheating, leaking private clinician numbers, exposing fraud risk scores).
+**Not a violation when:** The route is admin-only *and* the authorization is enforced at the router/guard level, with an explicitly named response type (`AdminQuizResponseDto`, `AdminDoctorProfileDto`).
 
 ---
 
@@ -536,6 +564,34 @@ router, and the response type is named for that (`AdminQuizResponse`).
 **Why:** Clients type responses once per endpoint. A conditional shape forces defensive
 parsing everywhere.
 **Not a violation when:** The variants are discriminated and documented.
+
+---
+
+### RS-407 — Default framework error payload bypasses API envelope
+**Severity:** major · **Applies to:** app bootstrap, exception filters, error handlers
+**Detect:** Unhandled framework exceptions returning default shapes (e.g. NestJS default `{ statusCode: 404, message: "...", error: "Not Found" }` or Express HTML error pages) rather than the standard `{ success: false, error: { code, message } }` envelope.
+Grep hint: `app.useGlobalFilters` missing in NestJS `main.ts`, or custom error responses missing `success: false`.
+
+```ts
+// Bad — default NestJS error structure breaks client envelope expectations
+{
+  "statusCode": 404,
+  "message": "Doctor not found",
+  "error": "Not Found"
+}
+
+// Good — transformed by global ExceptionFilter
+{
+  "success": false,
+  "error": {
+    "code": "DOCTOR_NOT_FOUND",
+    "message": "Doctor not found"
+  }
+}
+```
+
+**Why:** Client API clients and SDKs rely on a single consistent envelope parser. If unexpected or validation errors slip through in the default framework format, the mobile app crashes or fails to decode error messages.
+**Not a violation when:** The endpoint is a raw file stream, OAuth callback redirect, or Prometheus metrics endpoint.
 
 ---
 

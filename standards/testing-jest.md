@@ -249,17 +249,24 @@ inject it instead (see `JT-602`).
 
 ### JT-202 — Real I/O inside a unit test
 **Severity:** critical · **Applies to:** `*.spec.ts`, `*.test.ts` that are unit tests
-**Detect:** `mongoose.connect`, a live `Model` call with no `jest.mock`, `nodemailer`
-sending, `fetch`/`axios` to a URL, filesystem writes.
+**Detect:** `mongoose.connect`, `DataSource.initialize`, `prisma.$connect`, a live `Model` or repository call with no mock, `nodemailer` sending, `fetch`/`axios` to a live network URL, filesystem writes.
 
 ```ts
-// Bad
+// Bad — connects to live database in a unit test
 beforeAll(async () => { await mongoose.connect(process.env.MONGO_URI!); });
 
-// Good — unit test
+// Good — Express/Mongoose unit test with mocked repository
 jest.mock("./quiz.repository");
 const quizRepository = jest.mocked(quizRepositoryModule).quizRepository;
 quizRepository.findById.mockResolvedValue(makeQuiz());
+
+// Good — NestJS unit test with mocked provider
+const module = await Test.createTestingModule({
+  providers: [
+    BookingService,
+    { provide: SlotRepository, useValue: { holdSlot: jest.fn().mockResolvedValue(mockHold) } },
+  ],
+}).compile();
 ```
 
 **Why:** A unit test that touches the network is slow, flaky, order-dependent, and can
@@ -538,6 +545,34 @@ template) with inline snapshots.
 **Why:** A regression test states the rule that must hold forever; the ticket number goes
 in a comment.
 **Not a violation when:** The name states the behaviour and merely cites the ticket.
+
+---
+
+### JT-310 — Untested concurrent execution on state-changing operations
+**Severity:** major · **Applies to:** Integration tests (`*.e2e-spec.ts`, `tests/**/*.spec.ts`)
+**Detect:** An endpoint or service managing scarce resources (appointment slot booking, exam attempts, voucher redemptions) tested only sequentially, with no concurrency test firing parallel promises (`Promise.all([book(), book()])`).
+
+```ts
+// Bad — only tests one user booking in isolation; race conditions pass silently
+it("books an available slot", async () => {
+  const res = await request(app).post(`/slots/${slotId}/book`).set(authHeader);
+  expect(res.status).toBe(201);
+});
+
+// Good — fires concurrent requests to assert mutual exclusion under load
+it("prevents double-booking when two users book simultaneously", async () => {
+  const [res1, res2] = await Promise.all([
+    request(app).post(`/slots/${slotId}/book`).set(patient1Auth),
+    request(app).post(`/slots/${slotId}/book`).set(patient2Auth),
+  ]);
+
+  const statuses = [res1.status, res2.status].sort();
+  expect(statuses).toEqual([201, 409]); // exactly one succeeds, one rejected with conflict
+});
+```
+
+**Why:** Sequential tests cannot expose race conditions, missing `SELECT FOR UPDATE` locks, or absent database uniqueness constraints. If concurrent calls are not simulated, double-booking bugs deploy to production undetected.
+**Not a violation when:** The resource is strictly partitioned per user (e.g., editing personal profile details).
 
 ---
 
@@ -820,3 +855,29 @@ it.each([
 through `supertest` that exercises routing, validation middleware, auth, and error mapping.
 **Not a violation when:** The controller contains real mapping logic worth isolating — in
 which case `CC-201` may also apply.
+
+---
+
+### JT-706 — Event listeners untested for idempotent replay
+**Severity:** major · **Applies to:** Test files covering event consumers (`*.spec.ts`)
+**Detect:** An event consumer or listener tested only with a single invocation, with no assertion verifying that dispatching the same event ID twice produces no duplicate side effects (duplicate emails/SMS, duplicate charges, or error cascades).
+
+```ts
+// Bad — only tests a single call; doesn't verify idempotency
+it("sends booking confirmation SMS", async () => {
+  await consumer.handle(bookingEvent);
+  expect(smsService.send).toHaveBeenCalledTimes(1);
+});
+
+// Good — verifies handling the same event twice performs no duplicate operations
+it("ignores duplicate booking confirmed events", async () => {
+  await consumer.handle(bookingEvent);
+  await consumer.handle(bookingEvent); // duplicate replay
+
+  expect(smsService.send).toHaveBeenCalledTimes(1); // exactly once
+});
+```
+
+**Why:** In event-driven architectures, brokers guarantee at-least-once delivery, not exactly-once. Consumers will receive duplicate messages during network retries and worker reboots. Without idempotency tests, bugs that charge or notify users multiple times pass unnoticed.
+**Not a violation when:** The event handler performs an inherently idempotent operation (e.g., an upsert or setting a static cache key).
+

@@ -1,17 +1,18 @@
 # Code Standards — Review Agent Operating Manual
 
-Three rule catalogs live beside this file. Each rule has a stable ID so findings are
+Four rule catalogs live beside this file. Each rule has a stable ID so findings are
 comparable across teams, across runs, and over time.
 
 | Catalog | Prefix | Scope |
 | --- | --- | --- |
-| [`clean-code.md`](./clean-code.md) | `CC-###` | Naming, function design, layering, duplication, error handling, async correctness |
-| [`typescript.md`](./typescript.md) | `TS-###` | Compiler config, type escapes, type modelling, Express/Mongoose typing, module conventions |
-| [`testing-jest.md`](./testing-jest.md) | `JT-###` | Test structure, mocking policy, assertions, isolation, coverage meaningfulness |
-| [`restful-api.md`](./restful-api.md) | `RS-###` | Resource naming, HTTP methods, status codes, request/response contracts, API security |
+| [`clean-code.md`](./clean-code.md) | `CC-###` | Naming, function design, layering, duplication, error handling, async correctness, concurrency, domain events |
+| [`typescript.md`](./typescript.md) | `TS-###` | Compiler config, type escapes, type modelling, framework/ORM typing, module conventions |
+| [`testing-jest.md`](./testing-jest.md) | `JT-###` | Test structure, mocking policy, assertions, isolation, coverage meaningfulness, concurrency & event testing |
+| [`restful-api.md`](./restful-api.md) | `RS-###` | Resource naming, HTTP methods, status codes, request/response contracts, API security, idempotency |
 
-Target codebase: Node + Express + TypeScript + Mongoose services under
-`online-exam/team-*`, organised as `src/modules/<feature>/<feature>.{controller,service,repository,routes,validation}.ts`.
+Target codebases across bootcamp projects:
+- **Project 1 (Online Exam):** Node + Express + TypeScript + Mongoose services under `online-exam/team-*`, organised as `src/modules/<feature>/<feature>.{controller,service,repository,routes,validation}.ts`.
+- **Project 2 (DOCURA):** Node + NestJS + TypeScript + PostgreSQL (TypeORM/Prisma) + Event-Driven services under `health-app/team-*`, organised as modular NestJS vertical slices (`@Module`, `@Controller`, `@Injectable`).
 
 ---
 
@@ -80,8 +81,7 @@ Do not report:
 - **Style a formatter owns.** Quotes, semicolons, trailing commas, import order, line
   width. Prettier/ESLint territory. Exception: a rule below that explicitly covers it.
 - **Hypotheticals.** "This could break if X" without a path in the code that reaches X.
-- **Framework idiom.** Express's `(req, res, next)` signature, Mongoose's
-  `Schema`/`model` pairing, and Jest's `describe`/`it` nesting are not violations.
+- **Framework idiom.** Express's `(req, res, next)` signature, NestJS parameter decorators (`@Body()`, `@Param()`, `@Req()`), Nest constructor injection, Mongoose's `Schema`/`model` pairing, TypeORM/Prisma entity definitions, and Jest's `describe`/`it` nesting are not violations.
 - **Test-only shortcuts inside test files** that a rule in `testing-jest.md` explicitly
   permits (fixtures, builders, `as unknown as` on a mock).
 - **Pre-existing code untouched by the diff**, unless the task asks for a full audit.

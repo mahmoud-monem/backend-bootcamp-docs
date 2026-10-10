@@ -15,7 +15,7 @@ and the false-positive rules.
 | `TS-2xx` | Modelling types |
 | `TS-3xx` | Function signatures and generics |
 | `TS-4xx` | `null` / `undefined` handling |
-| `TS-5xx` | Express, Mongoose, and library typing |
+| `TS-5xx` | Framework, ORM, and Boundary Typing |
 | `TS-6xx` | Modules, imports, and naming conventions |
 
 ---
@@ -539,7 +539,7 @@ value is required.
 
 ---
 
-## TS-5xx — Express, Mongoose, and library typing
+## TS-5xx — Framework, ORM, and Boundary Typing
 
 ### TS-501 — `Request` augmented ad hoc per file
 **Severity:** major · **Applies to:** `src/**/*.ts`
@@ -668,6 +668,65 @@ loggers. Grep the import sites to confirm both are actually used.
 **Why:** Two validation stacks means two definitions of "valid", and reviewers must know
 which one guards a given route.
 **Not a violation when:** A migration is in progress and tracked.
+
+---
+
+### TS-507 — NestJS DTO class property without runtime validation decorator
+**Severity:** major · **Applies to:** `src/**/*.dto.ts`
+**Detect:** A property on a DTO class with a TypeScript type annotation but missing `class-validator` decorator(s) (e.g. `@IsString()`, `@IsNumber()`, `@IsNotEmpty()`, `@IsOptional()`).
+Grep hint: Class properties in `*.dto.ts` that have no `@Is*` or `@Validate*` decorator on the preceding lines.
+
+```ts
+// Bad — TypeScript type is erased; ValidationPipe cannot validate or whitelist it
+export class CreateDoctorDto {
+  name: string;
+  specialtyId: string;
+  consultationFee: number;
+}
+
+// Good — decorated with class-validator
+export class CreateDoctorDto {
+  @IsString()
+  @IsNotEmpty()
+  name: string;
+
+  @IsUUID('4')
+  specialtyId: string;
+
+  @IsInt()
+  @Min(0)
+  consultationFee: number;
+}
+```
+
+**Why:** TypeScript types only exist at compile time. NestJS relies on `ValidationPipe` with `class-validator` to enforce contracts at runtime. Un-decorated fields are either stripped by `whitelist: true` or admitted with unverified types (e.g. strings where numbers are expected).
+**Not a violation when:** The DTO is an internal read-only interface or response model that does not participate in request payload validation.
+
+---
+
+### TS-508 — Raw SQL or query builder without parameterization
+**Severity:** critical · **Applies to:** `src/**/*.repository.ts`, `src/**/*.service.ts`
+**Detect:** Template literals or string concatenation used to inject variables directly into SQL queries (`dataSource.query(...)`, `prisma.$queryRawUnsafe(...)`, `queryBuilder.where(...)`).
+Grep hint: `(\$queryRawUnsafe|query\()\s*[\`"'].*\$\{|where\(['"]\w+\s*=\s*['"]\s*\+`
+
+```ts
+// Bad — SQL injection vulnerability via template literal
+await this.dataSource.query(
+  `SELECT * FROM doctors WHERE specialty = '${specialty}' AND is_active = true`
+);
+
+// Good — parameterized query
+await this.dataSource.query(
+  `SELECT * FROM doctors WHERE specialty = $1 AND is_active = true`,
+  [specialty]
+);
+
+// Good (Prisma) — typed query tag with automatic parameterization
+await this.prisma.$queryRaw`SELECT * FROM doctors WHERE specialty = ${specialty}`;
+```
+
+**Why:** Concatenating user-supplied input into SQL strings bypasses escaping and permits SQL injection attacks. Parameterized queries enforce separation between SQL instructions and data literals.
+**Not a violation when:** The concatenated string is an internal constant or hardcoded identifier that is not derived from runtime input.
 
 ---
 

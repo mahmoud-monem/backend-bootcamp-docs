@@ -478,22 +478,21 @@ maps the result → response.
 
 ### CC-202 — Data access outside the repository layer
 **Severity:** major · **Applies to:** `src/**/*.controller.ts`, `src/**/*.service.ts`, middleware
-**Detect:** Direct Mongoose model calls outside `*.repository.ts` / `repos/`.
-Grep hint: `\b[A-Z]\w*Model\.(find|findOne|findById|create|updateOne|deleteOne|aggregate)`
+**Detect:** Direct database queries outside `*.repository.ts` / `repos/` (e.g. direct Mongoose model methods, Prisma client calls, TypeORM `Repository`/`EntityManager`/`QueryBuilder`, raw SQL queries).
+Grep hint: `\b[A-Z]\w*Model\.(find|findOne|findById|create|updateOne|deleteOne|aggregate)|prisma\.\w+\.(find|create|update|delete)|createQueryBuilder|getRepository\(`
 
 ```ts
-// Bad — quiz.service.ts
+// Bad — quiz.service.ts / doctor.service.ts
 const quiz = await QuizModel.findById(id).populate("questions").lean();
+const doctors = await this.prisma.doctor.findMany({ where: { isAvailable: true } });
 
-// Good — quiz.service.ts
+// Good — quiz.service.ts / doctor.service.ts
 const quiz = await this.quizRepository.findByIdWithQuestions(id);
+const doctors = await this.doctorRepository.findAvailable();
 ```
 
-**Why:** Query details leaking upward couples business rules to the schema and to Mongoose
-itself; every query change then ripples through services and controllers.
-**Not a violation when:** The project has deliberately no repository layer *and* is
-consistent about it — then the service layer is the data boundary and controllers still
-may not query.
+**Why:** Query details leaking upward couples business rules to database ORM/schema specifics; any schema migration, driver change, or query optimization ripples through services and controllers.
+**Not a violation when:** The project has deliberately chosen no repository layer *and* is consistent about it across all modules — in that architecture the service layer is the explicit data boundary and controllers still may not query.
 
 ---
 
@@ -612,6 +611,30 @@ dependencies at import time, when other modules need to inject fakes.
 `jest.mock` gymnastics to substitute anything.
 **Not a violation when:** The project consistently uses module-level singletons and the
 constructor still accepts its dependencies (so tests can build their own instance).
+
+---
+
+### CC-209 — Bypassing framework Dependency Injection
+**Severity:** major · **Applies to:** `src/**/*.ts` in NestJS codebases (`health-app/**`)
+**Detect:** Manual instantiation of providers via `new ServiceName(...)` or static service invocations inside controllers, services, or handlers instead of constructor injection.
+Grep hint: `new\s+[A-Z]\w*(Service|Repository|Gateway|Helper)\(` inside `@Injectable()` or `@Controller()` classes.
+
+```ts
+// Bad — appointment.controller.ts
+@Controller('appointments')
+export class AppointmentController {
+  private appointmentService = new AppointmentService(); // manual instantiation
+}
+
+// Good — appointment.controller.ts
+@Controller('appointments')
+export class AppointmentController {
+  constructor(private readonly appointmentService: AppointmentService) {}
+}
+```
+
+**Why:** Manual instantiation breaks NestJS IoC lifecycle management, ignores configured provider scopes, makes mocking collaborators in unit tests difficult, and often creates duplicate connection pools or stateful instances.
+**Not a violation when:** Instantiating pure value objects, domain entities without dependencies, DTOs, or custom Error objects.
 
 ---
 
@@ -960,6 +983,64 @@ tight loops over full collections inside a handler. Grep hint: `Sync\(`
 
 ---
 
+### CC-506 — External I/O executed inside an open database transaction
+**Severity:** critical · **Applies to:** `src/**/*.service.ts`, `src/**/*.repository.ts`
+**Detect:** Network calls to external APIs (payment gateways, Twilio SMS, nodemailer, LLMs, third-party webhooks) inside a database transaction block (`$transaction`, `queryRunner.startTransaction`, `session.withTransaction`).
+Grep hint inside transaction blocks: `stripe\.|axios\.|fetch\(|nodemailer|mailer\.|twilio\.|client\.messages\.create`
+
+```ts
+// Bad — holding database row locks while waiting for Stripe over the internet
+await dataSource.transaction(async (manager) => {
+  const slot = await manager.findOne(Slot, { where: { id: slotId }, lock: { mode: "pessimistic_write" } });
+  slot.status = "booked";
+  await manager.save(slot);
+
+  const charge = await stripe.charges.create({ amount: 5000, currency: "egp" }); // 300-1500ms network wait!
+  await manager.save(new Payment({ chargeId: charge.id, slotId }));
+});
+
+// Good — reserve/hold slot with short TTL in DB, charge externally, then confirm
+const hold = await this.slotRepository.holdSlot(slotId, userId, HOLD_TTL_MS);
+const charge = await this.paymentGateway.charge({ amount: hold.amount, cardToken });
+await this.bookingRepository.confirmBooking(hold.id, charge.id);
+```
+
+**Why:** Holding database locks while awaiting high-latency third-party networks starves the connection pool, locks concurrent transactions, and can cause database connection pool exhaustion across the entire application.
+**Not a violation when:** The call is to an in-memory or co-located caching layer (e.g. Redis client running within low single-digit milliseconds).
+
+---
+
+### CC-507 — Unprotected read-modify-write on shared bookable state
+**Severity:** critical · **Applies to:** `src/**/*.service.ts`, `src/**/*.repository.ts`
+**Detect:** Reading inventory, seats, or schedule slots into memory, validating availability, and issuing an update without atomic database-level locking (`SELECT ... FOR UPDATE`, optimistic `@VersionColumn`, or database unique constraint).
+Grep hint: `if (.*isAvailable|.*status === ['"]free['"]|.*status === ['"]available['"])` followed later by an unconditional update.
+
+```ts
+// Bad — two simultaneous requests both read status === 'available' and both succeed
+const slot = await this.slotRepository.findById(slotId);
+if (slot.status !== 'available') throw new ConflictException('Slot taken');
+slot.status = 'booked';
+slot.patientId = userId;
+await this.slotRepository.save(slot);
+
+// Good — pessimistic lock inside transaction or atomic conditional update
+await this.dataSource.transaction(async (manager) => {
+  const slot = await manager.findOne(Slot, {
+    where: { id: slotId, status: 'available' },
+    lock: { mode: 'pessimistic_write' },
+  });
+  if (!slot) throw new ConflictException('Slot is no longer available');
+  slot.status = 'booked';
+  slot.patientId = userId;
+  await manager.save(slot);
+});
+```
+
+**Why:** Under concurrency, two patients clicking "Book" simultaneously will both read the slot as available. Without locking or atomic constraints, both receive confirmation for the same doctor at the same minute.
+**Not a violation when:** The resource is strictly private to one user (e.g. updating user profile preferences) where cross-user concurrency cannot occur.
+
+---
+
 ## CC-6xx — Comments, dead code, noise
 
 ### CC-601 — Commented-out code
@@ -1091,26 +1172,29 @@ opaque.
 
 ## CC-8xx — Data and API boundary hygiene
 
-### CC-801 — Persistence document returned straight to the client
+### CC-801 — Persistence document or entity returned straight to the client
 **Severity:** major · **Applies to:** `src/**/*.controller.ts`, `src/**/*.service.ts`
-**Detect:** A Mongoose document or `.lean()` result handed to `res.json` with no mapper.
-Fields like `password`, `confirmOTP`, `forgetPasswordOTP`, `__v`, `refreshTokens` reaching
-the response.
+**Detect:** A Mongoose document, TypeORM `@Entity()` instance, or Prisma model returned directly to the HTTP response with no DTO mapper or serializer. Fields like `password`, `passwordHash`, `otpSecret`, `__v`, internal foreign keys, or soft-delete timestamps reaching the response.
+Grep hint: `res.json\((user|entity|doc)\)` or controller methods returning raw DB entities without a mapping function or `@UseInterceptors(ClassSerializerInterceptor)`.
 
 ```ts
-// Bad
-const user = await this.userRepository.findById(id);
-res.json({ success: true, data: user });      // includes password hash and OTP fields
+// Bad — raw persistence entity returned
+@Get(':id')
+async findOne(@Param('id') id: string) {
+  return this.userRepository.findById(id); // leaks passwordHash and internal relations
+}
 
-// Good
-res.json({ success: true, data: toUserResponse(user) });
-// toUserResponse picks id, name, email, role, createdAt — nothing else
+// Good — mapped to clean boundary DTO
+@Get(':id')
+async findOne(@Param('id') id: string): Promise<UserResponseDto> {
+  const user = await this.userRepository.findById(id);
+  if (!user) throw new NotFoundException('User not found');
+  return UserResponseDto.fromEntity(user);
+}
 ```
 
-**Why:** Schema is not API. Without an explicit mapper, every new field is published by
-default, and the first sensitive one is a breach.
-**Not a violation when:** A schema-level projection guarantees exclusion (`select: false`
-on secrets) *and* the response type is explicit.
+**Why:** Schema is not API contract. Without an explicit mapper or DTO serializer, schema migrations accidentally publish private columns, and changes to internal relations leak to public consumers.
+**Not a violation when:** A schema-level projection or serialization interceptor guarantees stripping of all private fields (`@Exclude()` with `ClassSerializerInterceptor`).
 
 ---
 
@@ -1163,3 +1247,85 @@ enforced in one endpoint but missing on a second path that reaches the same stat
 the schema, where every path passes.
 **Not a violation when:** The database enforces it (unique index, required field) and the
 code relies on that error.
+
+---
+
+### CC-806 — Floating-point representation used for monetary values
+**Severity:** critical · **Applies to:** `src/**/*.ts`, schemas, entity definitions
+**Detect:** Storing or computing money using standard JavaScript `number` without integer units, or database columns defined as `float`, `double`, or `real`.
+Grep hint: `type:\s*['"]float['"]|type:\s*['"]double['"]|price:\s*number\b|fee:\s*number\b`
+
+```ts
+// Bad — binary floating point math causes rounding discrepancies
+const total = 19.99 + 0.10; // 20.090000000000003
+@Column({ type: 'float' })
+consultationFee: number;
+
+// Good — integer minor units (piastres / cents) or exact DECIMAL
+@Column({ type: 'integer' }) // e.g. 50000 = 500.00 EGP
+consultationFeePiastres: number;
+
+// Good alternative — DECIMAL with string / Decimal.js mapping
+@Column({ type: 'decimal', precision: 10, scale: 2 })
+consultationFee: string;
+```
+
+**Why:** IEEE 754 floating point arithmetic is inherently imprecise for base-10 decimals. In financial calculations (fees, taxes, discounts, refunds), precision loss causes discrepancy between charged amounts and ledger totals.
+**Not a violation when:** Dealing with abstract ratios, ratings (e.g. 4.8 stars), percentages without currency accumulation, or geo-coordinates.
+
+---
+
+### CC-807 — Direct service coupling instead of domain events
+**Severity:** major · **Applies to:** `src/modules/**` in event-driven architectures (`health-app/**`)
+**Detect:** A core mutation service (e.g. `BookingService`, `PaymentService`) directly injecting and calling auxiliary services (`SmsService`, `EmailService`, `NotificationService`, `AnalyticsService`) to trigger side effects.
+Grep hint in `booking.service.ts` / `payment.service.ts`: `(smsService|emailService|notificationService|pushService)\.`
+
+```ts
+// Bad — booking service directly coupled to 4 downstream side-effects
+async confirmBooking(bookingId: string) {
+  const booking = await this.bookingRepo.markConfirmed(bookingId);
+  await this.smsService.sendConfirmation(booking); // if SMS fails, does booking fail?
+  await this.emailService.sendInvoice(booking);
+  await this.notificationService.notifyDoctor(booking);
+  return booking;
+}
+
+// Good — publish domain event, letting independent listeners handle side effects
+async confirmBooking(bookingId: string) {
+  const booking = await this.bookingRepo.markConfirmed(bookingId);
+  this.eventEmitter.emit('booking.confirmed', new BookingConfirmedEvent(booking));
+  return booking;
+}
+```
+
+**Why:** Direct service coupling tightly binds core business logic to external side effects. If the SMS provider is down, the booking throws an error or requires messy compensation logic. Events decouple the core truth from reactions.
+**Not a violation when:** The operation is synchronously required for the transaction to complete (e.g., verifying a card charge before confirming a paid booking).
+
+---
+
+### CC-808 — Non-idempotent event listener or consumer
+**Severity:** critical · **Applies to:** Event listeners (`@OnEvent`), message consumers (BullMQ, RabbitMQ)
+**Detect:** An event consumer performing external mutations (sending emails/SMS, charging payments, creating refund records) without checking whether the `eventId` or `idempotencyKey` has already been recorded.
+
+```ts
+// Bad — duplicate event delivery sends duplicate SMS messages
+@OnEvent('booking.confirmed')
+async handleBookingConfirmed(event: BookingConfirmedEvent) {
+  await this.smsService.send(event.phone, 'Your booking is confirmed');
+}
+
+// Good — check and record processed event key
+@OnEvent('booking.confirmed')
+async handleBookingConfirmed(event: BookingConfirmedEvent) {
+  const isNew = await this.processedEventsRepo.recordIfNotExists(event.id);
+  if (!isNew) {
+    this.logger.warn(`Duplicate event ${event.id} ignored`);
+    return;
+  }
+  await this.smsService.send(event.phone, 'Your booking is confirmed');
+}
+```
+
+**Why:** In distributed and event-driven architectures, at-least-once delivery is the standard contract. Duplicate event deliveries, retry policies, or consumer reboots without idempotency guarantees will charge users multiple times or spam them with repeated notifications.
+**Not a violation when:** The event handler performs an inherently idempotent operation (e.g., an unconditional cache invalidation or `SET key = value`).
+
