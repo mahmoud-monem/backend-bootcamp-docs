@@ -10,18 +10,20 @@
 
 ## How to read these stories
 
-Each story describes **a flow**: across the real Figma screens for the access stories, and through the hands of a developer, a reviewer or an operator for the platform stories. Then it lists the rules that flow must obey, the events it publishes, the edge cases, and the acceptance criteria you are graded on.
+Each story describes **a service flow**: for the access stories, the request a client makes (the mobile app, an operator tool, a test script), the gateway and the services it passes through, and what the response or event carries; for the platform stories, the flow through the hands of a developer, a reviewer or an operator. Then it lists the rules that flow must obey, the events it publishes, the edge cases, and the acceptance criteria you are graded on.
 
-What you will **not** find here: endpoint paths, request bodies, table or column names, queue names, routing keys or `.proto` definitions. Those are your design work, and PLAT-1 is where you produce them. If a story says *"the response tells the app to open Verify your e-mail"*, deciding **how** you express that is part of the exercise.
+No client UI is built in this project. The Figma design shows what the API must make possible; you build the services behind it.
+
+What you will **not** find here: endpoint paths, request bodies, table or column names, queue names, routing keys or `.proto` definitions. Those are your design work, and PLAT-1 is where you produce them. If a story says *"the response tells the client that verification is required"*, deciding **how** you express that is part of the exercise.
 
 Events are named in **plain language** (*"a verification code was issued"*) because the event catalogue is your deliverable. In PLAT-1, give each one its real past-tense name, its payload and its version, and use that name everywhere afterwards.
 
-Every story starts its User flow with a **`Services:` line** naming the services involved and the role each plays. The owner of the **first-listed** service is accountable for the story: they answer for it at the demo and review every pull request that touches their service. That does not mean they build it alone (see the suggested split). For the platform stories, the first-listed service is the one whose owner leads the shared work this sprint.
+Every story starts its Service flow with a **`Services:` line** naming the services involved and the role each plays. The owner of the **first-listed** service is accountable for the story: they answer for it at the demo and review every pull request that touches their service. That does not mean they build it alone (see the suggested split). For the platform stories, the first-listed service is the one whose owner leads the shared work this sprint.
 
 **What is different about this sprint.** You are no longer building one application. You are building seven that must agree with each other, and Sprint 1 is graded on whether they do:
 
 - The first two days produce **no code**. PLAT-1 is a gate: no service code is merged until your mentor signs the design.
-- Four of the seven stories have no screen. Every screen in the next four sprints depends on them without saying so.
+- Four of the seven stories (PLAT-1, PLAT-2, PLAT-3, AUTH-1) give a client no feature of its own. Every request in the next four sprints depends on them without saying so.
 - PLAT-3 is the first time a business action in one service causes work in another. Get the outbox and the idempotent consumer right here, on a verification email, and Sprint 4 can trust them with refunds.
 - Several acceptance criteria require **stopping something** in the middle of a flow: notification, RabbitMQ, Redis, Postgres. You prove those criteria by demoing them on the running Compose stack, not by explaining why they would work.
 
@@ -102,7 +104,7 @@ S1 owns identity but builds none of AUTH-2, AUTH-3 or AUTH-4, and **reviews ever
 
 ### Definition of Done (every story)
 
-- Every rule is enforced **in the service that owns it**: never by the app, and never by the gateway on another service's behalf.
+- Every rule is enforced **in the service that owns it**: never by the client, and never by the gateway on another service's behalf.
 - Every acceptance criterion has a test, including the negative, boundary and, where stated, **concurrent** ones. Integration tests run against real Postgres, Redis and RabbitMQ (Testcontainers), one database per service, never a shared test database.
 - Every edge case listed has a deliberate, defined behaviour.
 - Events leave through the **outbox**, carry the event envelope, and are consumed **idempotently**. A failing consumer retries with backoff and then dead-letters: it never undoes the producer's change and never drops the message.
@@ -125,14 +127,15 @@ messaging backbone every event will travel on, and the gateway that is the syste
 door. It also covers how a traveller gets in: sign up, email verification, sign in,
 sessions, password recovery, and the PIN that unlocks one phone.
 
-Source of truth: the Figma Start and Access screens (Splash, Choose Language, Onboarding 1–3,
-Sign up, Password doesn't match, Verify your e-mail counting down and at 00:00, Sign in,
-Create PIN, Confirm PIN, Enter your PIN and the Touch ID prompt), and the Presentation page's
-research on code delivery and biometric login. Also sections 2, 3, 4 (Module 1), 5.1, 5.10,
-6.1, 7, 8 and 9 and Appendix C of the requirements document.
+Source of truth: sections 2, 3, 4 (Module 1), 5.1, 5.10, 6.1, 7, 8 and 9 and Appendix C of the
+requirements document. The Figma Start and Access screens (Choose Language, Sign up, Password
+doesn't match, Verify your e-mail counting down and at 00:00, Sign in, Create PIN, Confirm PIN,
+Enter your PIN and the Touch ID prompt) and the Presentation page's research on code delivery
+and biometric login are context for what the API must make possible, not deliverables. Splash
+and Onboarding 1–3 need nothing from the server.
 
 Dependencies: none, because this is the first sprint. Every later sprint depends on it. Sprint 2's
-Complete your profile unlocks the "bookable traveller" level defined here. The outbox built
+profile completion (AUTH-5) unlocks the "bookable traveller" level defined here. The outbox built
 here carries every seat, payment and refund event. Sprint 4's payments go through the
 gateway built here.
 
@@ -143,9 +146,9 @@ cheapest two days of the project in which to be wrong.
 
 - The design-gate artifacts are in the repository and signed off by the mentor, and no service code was merged before the sign-off.
 - `docker compose up` from a clean clone brings up all seven services and their infrastructure, healthy.
-- A visitor can choose a language, sign up with an email and a password, receive the code in that language within 30 seconds, verify, and land signed in.
-- A traveller can sign in, stay signed in across restarts, sign out and recover a forgotten password, and is signed out everywhere after the recovery.
-- A traveller can unlock the app with a PIN or Touch ID on the phone they set it up on, and nowhere else.
+- A visitor can sign up with an email, a password and a chosen language, receive the code in that language within 30 seconds, verify, and come out of verification with a session.
+- A traveller can sign in, keep the session alive by refreshing it without the password, sign out and recover a forgotten password, and is signed out everywhere after the recovery.
+- A traveller can sign in with a registered phone's device credential and PIN, or with that credential alone once Touch ID has unlocked it on the phone, and the credential works for that phone and nowhere else.
 - Every request enters through the gateway, tokens are verified there without calling identity, and a route nobody opened is closed.
 - The first event crosses services through the outbox, survives a stopped consumer and a stopped broker, and is delivered once.
 - One correlation ID follows a request through HTTP, gRPC and RabbitMQ.
@@ -162,15 +165,16 @@ As a team of five service owners about to build seven services in parallel
 I want the whole system designed, written down and reviewed before anyone writes service code
 So that our services fit together the first time, and we make our mistakes on paper while they are cheap to fix
 
-### User flow (see Figma)
+### Service flow
 Services: booking (accountable: its owner assembles the gate package and draws the booking saga), gateway (the endpoint table and the error catalogue), identity, catalog, inventory, payment, notification (every owner contributes the ERD, the `.proto` methods, the events produced and consumed, and the cache keys of their own service).
 
-There is no screen to build. The Figma is the input: every screen on the Final UI page, plus
-the research on the Presentation page that explains why those screens look the way they do.
+There is no endpoint to build. The input is the requirements document, read alongside the Figma:
+every screen on the Final UI page shows something the API must make possible, and the research on
+the Presentation page explains why.
 
   Day 1, morning     the whole team walks every Appendix C screen, in order, and asks of each:
-                     what does the app need here, which service owns that data, and who else
-                     needs to know when it changes?
+                     what does a client need from the server here, which service owns that
+                     data, and who else needs to know when it changes?
   Day 1, afternoon   the service map and the event catalogue, drafted together
   Day 2, morning     each owner writes their service's part: ERD and constraints, .proto
                      methods with deadlines and errors, cache keys. The gateway owner writes
@@ -178,9 +182,9 @@ the research on the Presentation page that explains why those screens look the w
   Day 2, afternoon   cross-check (below) -> mentor review -> fixes -> sign-off recorded
   Day 3 onwards      code, against contracts everybody has already agreed
 
-The cross-check is deliberately mechanical: every screen reaches an endpoint, every endpoint
-reaches a service, every event has a producer and consumers, every cached key has an owner, and
-every product ruling has a home.
+The cross-check is deliberately mechanical: everything a screen needs from the server reaches an
+endpoint, every endpoint reaches a service, every event has a producer and consumers, every cached
+key has an owner, and every product ruling has a home.
 
 ### Rules and validations
 - The gate: No service code is merged before the mentor signs off. Spikes on a branch are fine; merging them is not. The sign-off is recorded in the repository: who signed, when, and against which commit.
@@ -189,13 +193,13 @@ every product ruling has a home.
 - ERD per service (§7.3): One diagram per service with the cardinalities inside it. References to another service's data are drawn differently: as an ID, never as a foreign key. Every constraint you rely on for correctness (unique, check, exclusion, foreign key) is listed with what it protects against, and each of the nine questions in §7.2 has a short written answer.
 - Event catalogue (§8): For every event: a past-tense name, the producer, when it is published, its payload, its version, every consumer and what each consumer does with it. Every event has exactly one producer. An event with no consumer is either deleted or carries a written reason for existing.
 - Contracts (§8): A `.proto` contract in `libs/contracts` for every synchronous call on the service map, with each method's deadline and the errors it can return. A call that is on the map but not in a contract, or in a contract but not on the map, fails the gate.
-- Gateway endpoint table (§8): Method, path, purpose, access level (public, traveller, bookable traveller, operator, conductor — BR-01) and the services each endpoint calls, for every screen in Appendix C. That includes the three rows with no design: the notifications inbox, the operations API and conductor ticket verification. The public endpoints are exactly BR-01's list and no others.
-- Error catalogue (§8): A stable code for every failure the app must react to differently, with its HTTP status and its Arabic and English messages (BR-56, BR-57). It starts with the examples in §8 and grows every sprint.
+- Gateway endpoint table (§8): Method, path, purpose, access level (public, traveller, bookable traveller, operator, conductor — BR-01) and the services each endpoint calls, covering everything the Appendix C screens need from the server. That includes the three rows with no design: the notifications inbox, the operations API and conductor ticket verification. The public endpoints are exactly BR-01's list and no others.
+- Error catalogue (§8): A stable code for every failure the client must react to differently, with its HTTP status and its Arabic and English messages (BR-56, BR-57). It starts with the examples in §8 and grows every sprint.
 - Booking saga (§8, §7.2): A sequence diagram covering the happy path, a declined payment, a hold that expires, a payment that succeeds after the hold expired (BR-36) and a crash in the middle. Every compensation is named as the call or event that performs it. The diagram also states where the saga's state is persisted and what resumes the saga after a crash.
 - Cache plan (§2.3): For every Redis key: its owner, contents, TTL, what invalidates it and what happens when Redis is unavailable. It covers every row of §2.3's required uses, and every key name is versioned. It also records the two decisions this sprint cannot start without: what "fail safe" means for sign-in limits, and what the gateway does when it cannot read the revoked-token list.
 - The five most dangerous edge cases (§6): The team chooses them and explains each one across services, naming the call or event that handles it. "The other service handles it" is not an answer.
 - Every ruling has a home (§9): For each of D1–D14, the service and the module, constraint or scheduled job that enforces it.
-- The five decisions of §2.2: For each multi-service flow, whether it is orchestrated or choreographed. What crosses the wire. What each service copies from others and how stale that copy may be. For each of the seven services, what happens when it is down: what still works, what degrades, what fails and what the user sees. And where each cross-service invariant lives, starting with BR-27.
+- The five decisions of §2.2: For each multi-service flow, whether it is orchestrated or choreographed. What crosses the wire. What each service copies from others and how stale that copy may be. For each of the seven services, what happens when it is down: what still works, what degrades, what fails and what the client is told. And where each cross-service invariant lives, starting with BR-27.
 - Decided once, now: Money is stored as integer piastres in every ERD that holds money, and all business times are Africa/Cairo (BR-14). Write down where the conversions happen. Deciding either of these in Sprint 4 means a migration.
 - Owned, signed and kept current: Every section names the student who owns it. Each owner approves the parts that describe their service, the whole team approves the cross-service parts, and the mentor signs the whole. After sign-off, a contract change starts as a pull request against the artifact, reviewed by every owner whose service it touches, and the code follows. An artifact that no longer matches the code is worse than none.
 
@@ -204,7 +208,7 @@ every product ruling has a home.
 
 ### Edge cases to handle
 - Two owners both believe they own a piece of data, for example the National ID's uniqueness among account holders (identity) and one National ID per seat on overlapping segments (BR-27). Exactly one service enforces each invariant.
-- A screen needs data from several services. The Tickets tab card shows the train, the passenger, the coach and seat, and the refund status. Decide whether the gateway aggregates or one service keeps a copy, and what that copy costs when the original changes.
+- One client request needs data from several services: each ticket the Tickets tab lists needs the train, the passenger, the coach and seat, and the refund status. Decide whether the gateway aggregates or one service keeps a copy, and what that copy costs when the original changes.
 - An event has a consumer but no producer, or a producer but no consumer. The cross-check should find this now, not Sprint 4.
 - The mentor rejects part of the design on day 2. Decide what can start on day 3 and what has to wait, and record that decision with the sign-off.
 - In Sprint 3 a contract turns out to be wrong. The change goes through the artifact first, so every consumer of that contract learns about it in review rather than from a failing demo.
@@ -212,7 +216,7 @@ every product ruling has a home.
 ### Acceptance criteria
 
 - Given the repository at the sign-off commit, when a reviewer opens the documented location, then the service map, an ERD per service, the event catalogue, the `.proto` contracts, the endpoint table, the error catalogue, the saga diagram, the cache plan, the five edge cases and the rulings table are all there, and every diagram is kept as source.
-- Given Appendix C, when each row is checked against the endpoint table, then every screen maps to at least one endpoint with its method, path, access level and the services it calls. This includes the notifications inbox, the operations API and conductor ticket verification.
+- Given Appendix C, when each row is checked against the endpoint table, then everything each screen needs from the server maps to at least one endpoint with its method, path, access level and the services it calls. This includes the notifications inbox, the operations API and conductor ticket verification.
 - Given the endpoint table, when the public endpoints are listed, then they are exactly the exceptions in BR-01, and every other endpoint names its access level.
 - Given the event catalogue, when each event is checked, then it has a past-tense name, exactly one producer, a version, a payload, and at least one consumer with what that consumer does, or a written reason for having none.
 - Given the service map and `libs/contracts`, when they are compared, then every synchronous call on the map has a `.proto` method with a deadline and its errors, and every method in the contracts appears on the map.
@@ -222,7 +226,7 @@ every product ruling has a home.
 - Given each service's ERD, when it is reviewed, then references to other services are drawn as IDs and not foreign keys, every correctness constraint states what it protects, money is in integer piastres, and the nine questions of §7.2 are answered.
 - Given the saga diagram, when it is reviewed, then it shows the happy path, a decline, a hold expiry, a late payment and a crash in the middle, with every compensation named as a call or an event.
 - Given the five dangerous edge cases, when each is read, then it names the calls and events that handle it in every service involved.
-- Given the §2.2 question "what happens when each service is down", when the answer is read, then all seven services are covered, each with what works, what degrades, what fails and what the user sees.
+- Given the §2.2 question "what happens when each service is down", when the answer is read, then all seven services are covered, each with what works, what degrades, what fails and what the client is told.
 - Given the error catalogue, when it is read, then every code has an HTTP status and both an Arabic and an English message, and the examples from §8 are present.
 - Given the repository history, when it is inspected, then no code under `apps/` was merged before the recorded sign-off, and every artifact section names its owner.
 
@@ -237,10 +241,10 @@ As a developer on a five-person team
 I want one repository in which `docker compose up` brings up all seven services, healthy, with the same envelope, errors, logs and correlation ID everywhere
 So that every story from here on is built and demoed on the real system, and a problem in any service can be traced across all of them
 
-### User flow (see Figma)
+### Service flow
 Services: catalog (accountable: its owner leads the shared skeleton, because catalog's own code starts in Sprint 2), gateway (the response envelope, language selection, and the point where the correlation ID is created), identity, inventory, booking, payment, notification (each one boots, validates its configuration, reports its health, logs and shuts down the same way).
 
-No screen. This is the developer's flow, and the reviewer's:
+No client feature. This is the developer's flow, and the reviewer's:
 
   clone the repository -> follow the README, and nothing else
   -> docker compose up
@@ -315,19 +319,19 @@ As a service owner whose service must tell other services what happened
 I want one shared, tested way to publish and consume events
 So that a crash, a duplicate or a stopped service never loses a message, starting with the message users complained about most: the verification code
 
-### User flow (see Figma)
+### Service flow
 Services: notification (accountable: the first consumer, which deduplicates, retries, dead-letters and sends the email to Mailpit), identity (the first producer, which records the event in the same transaction as the code), and the shared messaging library in `libs/` that every service uses from now on.
 
-The Figma screen is AUTH-2's "Verify your e-mail", which says "We Have Sent Code To Your Email".
-That sentence is a promise the backend has to keep after the response has already gone back
-to the app. The research measured how badly the old app kept it: 3 of 4 users could not find
-the code. The redesign's target is "OTP delivery 100% within 30s". This story is how you keep
-that promise, and how you prove you kept it.
+AUTH-2's sign-up response tells the client that a code has been sent ("We Have Sent Code To Your
+Email" in the design). That is a promise the backend has to keep after the response has already
+gone back to the client. The research measured how badly the old app kept it: 3 of 4 users could
+not find the code. The redesign's target is "OTP delivery 100% within 30s". This story is how you
+keep that promise, and how you prove you kept it.
 
-  the traveller taps Sign up (AUTH-2)
+  a client submits a sign-up (AUTH-2) -> gateway -> identity
   -> identity saves the account and the code's hash, and in the SAME transaction records
      the event "a verification code was issued"
-  -> identity answers the app: it does not wait for the email, and it never calls notification
+  -> identity answers the client: it does not wait for the email, and it never calls notification
   -> the relay publishes the recorded event to RabbitMQ
   -> notification receives it, checks whether it has already handled this event ID,
      renders the email in the account's language, sends it to Mailpit, records the event as
@@ -392,19 +396,19 @@ As a traveller using the ENR app
 I want every request to go through one door that knows who I am, lets me in only where I am allowed, and tells me plainly when something behind it is unavailable
 So that my account is protected and the app never hangs
 
-### User flow (see Figma)
+### Service flow
 Services: gateway (accountable: the only public entry point, which verifies tokens, enforces access levels, applies rate limits, routes over gRPC and maps errors into the envelope), identity (signs access tokens with its private key and makes the public key available to the gateway).
 
-This story has no screen of its own; every screen in the app reaches the backend through it. From the app's side:
+This story has no client feature of its own; every client request reaches the services through it:
 
-  the app calls /api/v1/... with or without an access token
+  a client calls /api/v1/... with or without an access token
   -> the gateway checks the rate limit for this client and this route
   -> the gateway verifies the token itself, with identity's public key and no call to identity
   -> the gateway checks that the token is not on the revoked list (signed out)
   -> the gateway checks the route's access level against the token
   -> the gateway calls the owning service over gRPC, with a deadline, passing who the caller is
   -> the service answers, fails, or does not answer in time
-  -> the gateway answers the app in the envelope, in the app's language
+  -> the gateway answers the client in the envelope, in the language the request asked for
 
 Access levels (BR-01):
   public               sign up, verify email, resend code, sign in, refresh, forgot password,
@@ -415,20 +419,20 @@ Access levels (BR-01):
   conductor            ticket verification
 
 ### Rules and validations
-- The only door: The gateway is the only service the app can reach, and it serves the public API under `/api/v1` (§2.1). The services can only be reached from inside the Compose network (PLAT-2).
+- The only door: The gateway is the only service a client can reach, and it serves the public API under `/api/v1` (§2.1). The services can only be reached from inside the Compose network (PLAT-2).
 - Tokens verified locally: identity signs access tokens with RS256, using a private key that only identity holds. The gateway verifies every token with the public key, checking the signature, that the expected algorithm was used, the expiry, the issuer and the audience, without calling identity per request. A token that claims any other algorithm, including "none" or a symmetric one, is refused.
 - Keys can rotate: Each token identifies the key that signed it, so identity can introduce a new key without signing everybody out. Tokens signed with the previous key keep working until they expire.
 - What a token carries: The account, its access level and roles, the session, and a unique token ID. Never personal data: anyone holding a token can read it, so an email address inside it is a leak.
 - Deny by default: Every route declares its access level. A route that declares nothing is closed, and a test that walks every route proves it. The public routes are exactly BR-01's list. An unverified account never receives a token (BR-05), so "traveller" always means a verified email.
-- Bookable traveller is enforced once: The level exists from this sprint, even though nothing makes a traveller bookable until AUTH-5 in Sprint 2. A traveller who is not bookable is refused with the code that sends the app to "Complete your profile" (BR-10). That check happens in one place and is never repeated in each handler (D4). Decide how the gateway learns that a profile is complete, and what it costs if that information is stale.
+- Bookable traveller is enforced once: The level exists from this sprint, even though nothing makes a traveller bookable until AUTH-5 in Sprint 2. A traveller who is not bookable is refused with the code that tells the client the profile must be completed first (BR-10). That check happens in one place and is never repeated in each handler (D4). Decide how the gateway learns that a profile is complete, and what it costs if that information is stale.
 - Staff roles: Operator and conductor are roles on staff accounts, carried in the token. The seed creates one operator account and one conductor account. A traveller's token never reaches an operator or conductor route, and staff routes are deny-by-default like everything else.
 - Who the caller is, inside: The gateway passes the verified caller to services in gRPC metadata, and strips anything in the incoming request that looks like that internal metadata. A service never trusts an identity claim that came from outside, and the network stops outsiders from calling services directly.
-- 404, not 403 (BR-09): Ownership is decided by the service that owns the record, because only that service has the data. "Not yours" and "does not exist" reach the app as the same 404 with the same body. A 403 would reveal that the record exists.
+- 404, not 403 (BR-09): Ownership is decided by the service that owns the record, because only that service has the data. "Not yours" and "does not exist" reach the client as the same 404 with the same body. A 403 would reveal that the record exists.
 - Rate limits shared by every instance: Request limits are counted in Redis, so two gateway instances enforce one limit, not two. Public routes are limited per client, especially sign in, sign up, resend, forgot password and PIN sign-in. Signed-in routes are limited per account. A request over the limit gets a 429 with a retry hint (§10.E). These limits protect the system. The business limits of BR-04 belong to identity (AUTH-2, AUTH-3), not to the gateway.
 - Revoked tokens (BR-06): Signing out puts the access token's ID on a revoked list in Redis. The gateway owns that list and checks it on every authenticated request. Each entry lives only until its token would have expired anyway, so the list never grows without bound. When identity revokes a whole session or a whole account (refresh-token reuse, password reset), those access tokens are refused within seconds. identity cannot write into the gateway's keys, so design how the gateway finds out.
 - Redis unavailable: Decide, and document in the cache plan, what the gateway does for rate limits and for the revoked list when Redis is down. Sign-in rate limiting fails safe, never open (§2.3 rule 7). "Unlimited" is not an acceptable choice for any of them. The gateway's health check reports the degradation.
 - Every call has a deadline: Each gRPC call uses the deadline set for that method in the contracts (PLAT-1). Only idempotent calls are retried, and only within the deadline.
-- Errors mapped deliberately: A documented mapping turns each gRPC status into an HTTP status, and the service's error code passes through unchanged into the envelope (§10.A). A service that is down produces a "temporarily unavailable" code (503) with a retry hint. A service that missed its deadline produces a "timed out" code (504). Neither ever shows gRPC internals, and both are rendered in the app's language.
+- Errors mapped deliberately: A documented mapping turns each gRPC status into an HTTP status, and the service's error code passes through unchanged into the envelope (§10.A). A service that is down produces a "temporarily unavailable" code (503) with a retry hint. A service that missed its deadline produces a "timed out" code (504). Neither ever shows gRPC internals, and both are rendered in the requested language.
 
 ### Domain events to publish
 - None of its own this sprint. If you choose events as the way the gateway learns that a session or an account was revoked, the gateway consumes them (AUTH-3).
@@ -445,17 +449,17 @@ Access levels (BR-01):
 ### Acceptance criteria
 
 - Given a valid access token, when a signed-in request is sent, then it reaches the owning service and identity receives no call for it. Prove it by stopping identity and seeing the request still succeed.
-- Given an expired, tampered, wrongly signed, "none"-algorithm or HS256-re-signed token, when it is sent, then it is refused with 401 and a code that tells the app to refresh or sign in.
+- Given an expired, tampered, wrongly signed, "none"-algorithm or HS256-re-signed token, when it is sent, then it is refused with 401 and a code that tells the client to refresh or sign in.
 - Given a token signed with the previous key after a key rotation, when it is sent before it expires, then it is accepted.
 - Given every route the gateway exposes, when a test walks them, then each one declares an access level, and the public ones are exactly BR-01's list.
 - Given a traveller's token, when it calls an operator or conductor route, then it is refused. Given an operator's token on an operator route, then it is allowed.
-- Given a traveller whose profile is incomplete, when they call a route that requires a bookable traveller, then it is refused with the code that sends the app to "Complete your profile".
+- Given a traveller whose profile is incomplete, when they call a route that requires a bookable traveller, then it is refused with the code that tells the client the profile must be completed first.
 - Given a request carrying a header that imitates the internal caller metadata for another account, when it reaches a service, then the service sees only the account from the token.
 - Given a record that belongs to another account, when it is requested, then the response is a 404 identical in status and body to the response for a record that does not exist. This sprint's first owned record is a phone's PIN credential (AUTH-4).
 - Given two gateway instances and a rate limit of N on sign in, when one client sends N+1 attempts alternating between the instances, then the last attempt gets a 429 with a retry hint, rather than the limit only tripping after 2N.
 - Given a traveller signs out, when the same access token is used on the next request, then both gateway instances refuse it. Once the token's own expiry has passed, its entry is gone from the revoked list.
 - Given Redis is stopped, when sign-in requests keep arriving, then they behave as the cache plan documents and are never unlimited, and the gateway's health check reports the degradation.
-- Given the service behind a route is stopped, when the route is called, then the app receives a 503 envelope with a retry hint in the requested language within the deadline, and routes to other services keep working.
+- Given the service behind a route is stopped, when the route is called, then the client receives a 503 envelope with a retry hint in the requested language within the deadline, and routes to other services keep working.
 - Given a service that answers more slowly than its deadline, when it is called, then the gateway answers with a 504 envelope at the deadline, and a non-idempotent call is not retried.
 - Given a service returns a domain error, when the gateway maps it, then the HTTP status follows the documented mapping, the code is unchanged, and no gRPC detail appears in the body.
 
@@ -470,28 +474,43 @@ As a first-time traveller
 I want to create an account with just my email and a password, and confirm my email with a code that actually arrives
 So that I can start planning trips without handing over my National ID up front
 
-### User flow (see Figma)
+### Service flow
 Services: identity (accountable: accounts, codes, attempt and resend counters), notification (sends the code by email, through PLAT-3), gateway (public routes, rate limits, the language of every message).
 
-Splash ("Egyptian National Railways")
--> Choose Language: English / Arabic, "Please choose your preferred language to continue", Continue
-   No server call. From here on, every request carries the chosen language.
--> Onboarding 1–3: "Book Easily, Travel Smart" · "Plan Your Journey Ahead" · "Easy to Use, For Everyone"
--> Sign up: "Create your Egyptian Railways account"
-     Email · Password · Confirm password (each with an eye toggle)
-     "Already have an account? sign in"
-     the error state "Password doesn't match" under Confirm password
--> Verify your e-mail: "We Have Sent Code To Your Email"
-     the address the code went to, masked, with "Not your email?"
-     the code field
-     a countdown that runs from 02:00 to 00:00 (the Figma shows it at 01:26)
-     "Send Again", which only works once the countdown reaches 00:00
--> the right code -> the email is verified and the traveller is signed in
--> Complete your profile (AUTH-5, Sprint 2 — "Skip" is allowed) -> Create PIN (AUTH-4) -> Home
+The traveller chooses a language on first launch. From then on every request carries it, and
+the sign-up request also carries it so that identity can store it on the account.
 
-"Not your email?" returns to Sign up with the form ready for another address.
+Sign up
+  a client submits an email, a password, its confirmation and the chosen language
+  -> gateway: public route, sign-up rate limit, message language from Accept-Language
+  -> identity validates all three fields at once, normalizes the email, stores the account
+     (unverified, with its language) and the code's hash, and records "an account was
+     registered" and "a verification code was issued" in the same transaction
+  -> the response carries no session and no code: only the address the code went to,
+     masked, and the seconds until a new code may be requested (120)
+  -> notification emails the code in the account's language (PLAT-3)
 
-Note what is NOT on the Sign up screen: name, phone and National ID. The research found that
+Verify
+  a client submits the code
+  -> identity checks its purpose, expiry, single use and the wrong-attempt count
+  -> right code: the email is verified, "an email address was verified" is recorded, and a
+     session is issued exactly as AUTH-3 issues one
+  -> wrong, expired or dead code: the response says which, with the seconds remaining
+     until a new code may be requested
+
+Resend (the design's "Send Again")
+  a client asks for a new code
+  -> identity enforces the 120-second wait and the hourly limit, kills the previous code,
+     issues a new one, and returns the new wait
+
+A traveller who mistyped the address ("Not your email?" in the design) simply signs up again
+with the right one. Nothing on the server ties the two sign-ups together.
+
+With the session from verification, the client can go on to profile completion (AUTH-5,
+Sprint 2, which may be skipped because a traveller who is not bookable can still use every
+traveller route) and to registering the phone for PIN sign-in (AUTH-4).
+
+Note what sign-up does NOT take: name, phone and National ID. The research found that
 "not all users want to provide their full 14-digit National ID just to create an account" (D4).
 Those details come later, before the first seat hold.
 
@@ -499,17 +518,17 @@ Those details come later, before the first seat hold.
 - Three fields (BR-02): Sign up takes an email, a password and its confirmation, and nothing else. All field errors are returned at once, each naming its field and what to change (BR-57).
 - Email normalization: The email is trimmed and compared case-insensitively, so " Ali@Example.COM " and "ali@example.com" are one account. Nothing else is rewritten; there are no provider-specific rules such as removing dots. Uniqueness on the normalized form is guaranteed by the database, not by a lookup before the insert.
 - Password (BR-02): At least 8 characters, including a letter, a digit and a symbol. Decide a maximum length and say why (some hashing algorithms silently ignore everything after 72 bytes). The password is stored only as a slow, salted hash and never appears in a log, a response or an error.
-- Confirmation: The confirmation must match the password exactly. A mismatch is the "Password doesn't match" error on the confirm field. The server checks it, even though the app checks it too.
-- The account's language (BR-56): The language the traveller chose on "Choose Language" arrives with the sign-up request and is stored on the account. Emails and push messages use it, because later there is no request to read it from. A missing or unsupported value falls back to the documented default (PLAT-2).
+- Confirmation: The confirmation must match the password exactly. A mismatch is the "Password doesn't match" error on the confirm field. The server checks it whether or not the client checked it too.
+- The account's language (BR-56): The language the traveller chose on first launch arrives with the sign-up request and is stored on the account. Emails and push messages use it, because later there is no request to read it from. A missing or unsupported value falls back to the documented default (PLAT-2).
 - An unverified account can only verify (BR-05): The account exists, but it receives no session and can do nothing except verify. Signing in to it gives AUTH-3's "verification required" outcome.
-- Signing up again: A sign-up for an email that belongs to an unverified account does not create a second account and does not answer "email taken". Instead it replaces that account's password and language and sends a new code, within the resend limits below. A sign-up for a verified email is refused with a code that points to Sign in and "Forgot your password ?". That answer does reveal that the email has an account. This is accepted here because the gateway rate-limits sign-up, and BR-08 closes the same leak on forgot password.
+- Signing up again: A sign-up for an email that belongs to an unverified account does not create a second account and does not answer "email taken". Instead it replaces that account's password and language and sends a new code, within the resend limits below. A sign-up for a verified email is refused with a code that points the client to sign in and password recovery. That answer does reveal that the email has an account. This is accepted here because the gateway rate-limits sign-up, and BR-08 closes the same leak on forgot password.
 - The code (BR-03): 6 digits from a cryptographically secure source, leading zeros allowed. Valid for 10 minutes, single-use, and valid only for email verification: a password-reset code never verifies an email. The code is stored as a hash, and issuing a new code kills the previous one.
-- Never in a response: The code never appears in any API response, log or error. The response says where the code went (masked) and how many seconds remain until "Send Again" is allowed.
-- Wrong attempts (BR-04): A code dies after 5 wrong attempts. The right digits typed on the sixth try still fail, and the traveller must ask for a new code.
-- Send Again (BR-04): Allowed 120 seconds after the previous code (the design's countdown), with at most 5 codes per hour per email, counting verification and password-reset codes together. The countdown comes from the server: the response carries the remaining seconds, so a reinstalled app or a second phone shows the same time.
+- Never in a response: The code never appears in any API response, log or error. The response says where the code went (masked) and how many seconds remain until a new code may be requested.
+- Wrong attempts (BR-04): A code dies after 5 wrong attempts. The right code submitted on the sixth try still fails, and the traveller must ask for a new code.
+- Resend (BR-04): A new code is allowed 120 seconds after the previous one (the design's countdown), with at most 5 codes per hour per email, counting verification and password-reset codes together. The wait is the server's: every response about the code carries the seconds remaining, so a reinstalled client or a second phone gets the same number, and a client never derives it from its own timer.
 - Counters that hold (BR-04, §2.3): Attempt and resend counters live in Redis, are owned by identity, and hold across identity instances and restarts. A Redis restart must not give anyone a fresh set of attempts. Decide how to guarantee that, write it in the cache plan, and prove it by restarting Redis in the middle of five wrong attempts (§6.1). When Redis is unreachable, attempts fail safe: they are refused with a retry hint, never allowed without limit.
 - Delivered asynchronously, measured (BR-03): The email is sent through PLAT-3, never inside the sign-up request. Sign-up succeeds even when notification is down, and the code reaches Mailpit within 30 seconds, measured.
-- Verified means signed in: The right code verifies the email and opens a session in exactly the way AUTH-3 issues one, so the traveller goes straight on to "Complete your profile" and "Create PIN".
+- Verified means signed in: The right code verifies the email and opens a session in exactly the way AUTH-3 issues one, so the client goes straight on to profile completion (AUTH-5) and PIN registration (AUTH-4) without a separate sign-in.
 
 ### Domain events to publish
 - An account was registered (notification keeps its own copy of the account's email address and language for every later email and push message).
@@ -522,25 +541,25 @@ Those details come later, before the first seat hold.
 - Sign-ups for "Ali@Example.com" and "ali@example.com " arrive at the same instant.
 - A code that starts with zero: 004213.
 - Redis restarts in the middle of someone's 5 wrong attempts (§6.1).
-- The traveller mistyped their email and tapped "Not your email?", and a day later the real owner of the mistyped address signs up.
-- A script hammers "Send Again" for someone else's email to flood their inbox.
+- The traveller mistyped their email, signed up again with the right address, and a day later the real owner of the mistyped address signs up.
+- A script hammers the resend request for someone else's email to flood their inbox.
 
 ### Acceptance criteria
 
-- Given a valid email, password and confirmation sent with Arabic as the language, when the traveller signs up, then an unverified account with language Arabic exists. The response contains no code, only the masked address and 120 seconds until Send Again, and an Arabic email with a 6-digit code reaches Mailpit within 30 seconds.
+- Given a valid email, password and confirmation sent with Arabic as the language, when the traveller signs up, then an unverified account with language Arabic exists. The response contains no code, only the masked address and 120 seconds until a new code may be requested, and an Arabic email with a 6-digit code reaches Mailpit within 30 seconds.
 - Given " Ali@Example.COM ", when the traveller signs up, then the account's email is stored as "ali@example.com", and a later sign-up with "ali@example.com" is treated as the same account.
 - Given two sign-ups for the same email in different letter case at the same instant, when both complete, then exactly one account exists, proven by a concurrent test.
 - Given a password of 7 characters with a letter, a digit and a symbol, or one of 8 characters without a symbol or without a digit, when the traveller signs up, then it is refused on the password field with a message saying what is missing. Given "abcdef1!", then it is accepted.
 - Given a confirmation that differs from the password, when the traveller signs up, then it is refused on the confirm field with the "Password doesn't match" message in the requested language.
-- Given the right code entered 9 minutes 59 seconds after it was issued, when it is submitted, then the email is verified and the traveller is signed in. Given the same code submitted again, then it is refused.
-- Given the right code entered 10 minutes 1 second after it was issued, when it is submitted, then it is refused as expired with a code that tells the app to offer "Send Again".
+- Given the right code, when it is submitted 9 minutes 59 seconds after it was issued, then the email is verified and the response carries a session. Given the same code submitted again, then it is refused.
+- Given the right code, when it is submitted 10 minutes 1 second after it was issued, then it is refused as expired with a code that tells the client to request a new code.
 - Given 5 wrong attempts on a code, when the right code is then submitted, then it is refused and a new code is required.
-- Given "Send Again" is requested 119 seconds after the previous code, when the request arrives, then it is refused with the seconds remaining and no email is sent. Given 120 seconds, then a new code is sent and the previous one no longer works.
+- Given a new code is requested 119 seconds after the previous code, when the request arrives, then it is refused with the seconds remaining and no email is sent. Given 120 seconds, then a new code is sent and the previous one no longer works.
 - Given 5 codes issued for one email within an hour, when a sixth is requested, then it is refused with a retry hint. The limit still holds after identity restarts, after Redis restarts, and with requests spread across two identity instances.
-- Given a code issued for a password reset, when it is submitted on "Verify your e-mail", then it is refused.
+- Given a code issued for a password reset, when it is submitted for email verification, then it is refused.
 - Given an email that belongs to an unverified account, when someone signs up with it again, then no second account exists, the new password is the one that works after verification, and only the newest code verifies.
 - Given an email that belongs to a verified account, when someone signs up with it, then it is refused with a code that points to sign in and password recovery.
-- Given the traveller taps "Not your email?" and signs up with another address, when they verify that second address, then that account is verified, and the first address can still be signed up for by its real owner later.
+- Given a traveller who signed up with a mistyped address signs up again with another address, when they verify that second address, then that account is verified, and the first address can still be signed up for by its real owner later.
 - Given a complete sign-up and verification, when the logs of the gateway, identity and notification are searched, then no password and no code appears.
 
 ---
@@ -554,43 +573,60 @@ As a returning traveller
 I want to sign in with my email and password, stay signed in between trips, sign out when I choose, and get back in if I forget my password
 So that the app is quick for me and useless to anyone who takes my phone or guesses my password
 
-### User flow (see Figma)
+### Service flow
 Services: identity (accountable: credentials, lockout, sessions and refresh tokens, reset codes), gateway (public routes, rate limits, the revoked-token list), notification (emails the reset code, through PLAT-3).
 
-Sign in: "Sign in to book your next trip!"
-  Email · Password
-  "Forgot your password ?"
-  "Don't have an account? sign up"
--> success -> on the first sign-in on this phone: Create PIN (AUTH-4) -> Home
--> unverified account: the app opens "Verify your e-mail" (AUTH-2)
--> locked account: the error says when the traveller can try again, and offers "Forgot your password ?"
+Sign in
+  a client submits an email and a password
+  -> gateway: public route, sign-in rate limit
+  -> identity checks the lock, then the password (a hash is checked even when no account exists)
+  -> verified account, right password: a session (access token and refresh token), and
+     "a traveller signed in" is recorded. After a first sign-in on a phone, the client may
+     register that phone for PIN sign-in (AUTH-4)
+  -> unverified account, right password: "verification required", with a new code if AUTH-2's
+     resend rules allow it, or the seconds remaining until one may be requested
+  -> locked account: refused, with the time remaining; password recovery still works
+  -> unknown email or wrong password: one identical wrong-credentials answer
 
-While the traveller uses the app, the session renews itself in the background. Closing and
-reopening the app does not ask for the password again.
+Staying signed in
+  a client presents its refresh token
+  -> identity rotates it: a new access token and a new refresh token, and the old refresh
+     token stops working. A rotated token presented again revokes the whole session
+  A client that is closed and reopened keeps its session this way, without the password.
 
-Settings -> Logout -> the session on this phone ends.
+Sign out (Settings -> Logout in the design)
+  a client signs out
+  -> the gateway puts this access token on its revoked list
+  -> identity revokes this session's refresh token and this phone's PIN credential, and
+     records "a session was revoked". Other devices stay signed in
 
-"Forgot your password ?"
-  -> the traveller enters their email
-  -> a reset code arrives by email; the code step looks and behaves like "Verify your e-mail"
-     (countdown, "Send Again")
-  -> a new password and its confirmation
-  -> done: every session on every device is signed out, and the traveller signs in with the new password
+Password recovery
+  a client submits an email
+  -> identity answers identically whether or not an account exists; only if one exists does
+     it issue a reset code and record "a verification code was issued" for a password reset,
+     which notification emails (PLAT-3). Resending follows AUTH-2's rules
+  a client submits the reset code and a new password with its confirmation
+  -> identity checks the code and the new password, stores the new password, revokes every
+     session and every device credential on the account, lifts any lock, verifies an
+     unverified account, and records "a password was reset"
+  -> the gateway refuses every outstanding access token of the account within seconds
+  -> the traveller signs in with the new password
 
-The Figma draws the link but not the recovery steps themselves. Those steps reuse the code
-screen and the password fields above. You define the API.
+The Figma draws only a "Forgot your password ?" link, not the recovery steps. Those steps reuse
+AUTH-2's code rules and sign-up's password rules. You define the API, including whether the code
+and the new password arrive in one request or two.
 
 ### Rules and validations
 - Same answer for unknown email and wrong password: An unknown email and a wrong password produce the same status, body and code, and take comparable time, so check a password hash even when there is no account. Sign in never reveals which emails have accounts.
-- Verification required (BR-05): An unverified account with the right password gets a "verification required" outcome instead of a session, so the app opens "Verify your e-mail". A new code is sent if AUTH-2's resend rules allow it; otherwise the response carries the remaining countdown. With a wrong password, the account gets the ordinary wrong-credentials answer, so the verification state is revealed only to someone who knows the password.
+- Verification required (BR-05): An unverified account with the right password gets a "verification required" outcome instead of a session, so the client knows to ask for the code. A new code is sent if AUTH-2's resend rules allow it; otherwise the response carries the seconds remaining until one may be requested. With a wrong password, the account gets the ordinary wrong-credentials answer, so the verification state is revealed only to someone who knows the password.
 - Lockout (BR-04): 10 failed sign-ins lock the account for 15 minutes. Failures are counted per normalized email whether or not an account exists, so the lock itself reveals nothing. A successful sign-in resets the count, and the count expires 15 minutes after the last failure. Attempts during the lock are refused, even with the right password; they are not counted and do not extend the lock. A completed password reset lifts the lock.
 - The counter belongs to identity: Lockout is a business rule, so its counter lives in identity's Redis keys and holds across gateway instances, identity instances and restarts (§6.1). The gateway's rate limits (AUTH-1) are a separate protection. When Redis is unreachable, sign-in fails safe as the cache plan documents, never without limit.
-- The session (BR-06): A successful sign-in issues a short-lived access token (15 minutes at most, RS256, see AUTH-1) and a refresh token. Decide and document how long a refresh token lives, so that travellers stay signed in across restarts (§4, Module 1). Refresh tokens are stored hashed, so a database leak does not hand out working sessions.
+- The session (BR-06): A successful sign-in issues a short-lived access token (15 minutes at most, RS256, see AUTH-1) and a refresh token. Decide and document how long a refresh token lives, so that a client keeps its session across restarts without the password (§4, Module 1). Refresh tokens are stored hashed, so a database leak does not hand out working sessions.
 - Rotation: Every refresh returns a new access token and a new refresh token, and the old refresh token stops working. Two refreshes with the same token at the same instant must not both produce live successors. That guarantee lives in the database, not in an `if`.
-- Reuse means theft (BR-06): If a refresh token that was already rotated is presented again, the whole session is revoked, the thief's tokens and the real app's alike, and the event is recorded. The real traveller has to sign in again; that is the price of not knowing which of the two is the thief.
-- Sign out (BR-06): Logout revokes this session's refresh token and its access token immediately, so the gateway refuses that access token from the next request on (AUTH-1). Other devices stay signed in. Logout also revokes this phone's PIN credential (AUTH-4): after signing out, the PIN no longer opens the app.
-- Forgot password, no enumeration (BR-08): The answer to "Forgot your password ?" is identical whether or not the email has an account: same status, same body, comparable time. An email goes out only if the account exists. The hourly limit counts unknown emails too, so even "too many requests" reveals nothing.
-- The reset code (BR-08, BR-03, BR-04): 6 digits, valid for 10 minutes, single-use, and valid only for password reset. 5 wrong attempts kill it. "Send Again" works after 120 seconds, with at most 5 codes per hour per email, shared with verification codes. The code never appears in a response or a log.
+- Reuse means theft (BR-06): If a refresh token that was already rotated is presented again, the whole session is revoked, the thief's tokens and the real client's alike, and the event is recorded. The real traveller has to sign in again; that is the price of not knowing which of the two is the thief.
+- Sign out (BR-06): Logout revokes this session's refresh token and its access token immediately, so the gateway refuses that access token from the next request on (AUTH-1). Other devices stay signed in. Logout also revokes this phone's PIN credential (AUTH-4): after signing out, the PIN no longer signs anyone in on that phone.
+- Forgot password, no enumeration (BR-08): The answer to a password-recovery request is identical whether or not the email has an account: same status, same body, comparable time. An email goes out only if the account exists. The hourly limit counts unknown emails too, so even "too many requests" reveals nothing.
+- The reset code (BR-08, BR-03, BR-04): 6 digits, valid for 10 minutes, single-use, and valid only for password reset. 5 wrong attempts kill it. A new code may be requested after 120 seconds, with at most 5 codes per hour per email, shared with verification codes. The code never appears in a response or a log.
 - The new password: It follows the same strength rules as sign up (BR-02), must match its confirmation, and must differ from the current password (BR-08). A rejected new password does not use up the reset, so the traveller can try again while the reset is still valid.
 - Reset signs out everywhere (BR-06): A completed reset revokes every session and every device's PIN credential on the account. The gateway refuses all of that account's access tokens within seconds, not after up to 15 minutes. A lost phone that was signed in with a PIN is signed out too (§6.1).
 - An unverified account can reset: Completing a reset proves the traveller controls the inbox, so it also verifies an unverified account.
@@ -605,8 +641,8 @@ screen and the password fields above. You define the API.
 
 ### Edge cases to handle
 - Failed sign-ins for one account arrive through two gateway instances and two identity instances. Is the lock still at 10 (§6.1)?
-- A refresh token is stolen and used after the real app has already rotated it (§6.1).
-- The app refreshes from two screens at the same instant with the same refresh token. Decide whether a short grace window returns the same new pair or the reuse rule applies, and document it.
+- A refresh token is stolen and used after the real client has already rotated it (§6.1).
+- The client sends two refreshes at the same instant with the same refresh token. Decide whether a short grace window returns the same new pair or the reuse rule applies, and document it.
 - The traveller resets their password while their lost phone is still signed in with a PIN (§6.1).
 - An attacker sends 10 wrong passwords every 15 minutes to keep a traveller locked out. What can the real traveller still do?
 - The access token expires in the middle of a chain of requests that started 14 minutes ago.
@@ -621,12 +657,12 @@ screen and the password fields above. You define the API.
 - Given 10 failed sign-ins spread across two gateway instances and two identity instances, when the right password is then sent, then it is refused as locked with the time remaining, and after 15 minutes it succeeds.
 - Given a refresh, when it completes, then a new pair is returned and the previous refresh token no longer works.
 - Given two refreshes with the same refresh token at the same instant, when both complete, then at most one new refresh token is ever valid, proven by a concurrent test.
-- Given a refresh token that was already rotated, when it is presented again, then the whole session is revoked: neither the thief's nor the real app's refresh token works, and the session's access tokens are refused within seconds.
+- Given a refresh token that was already rotated, when it is presented again, then the whole session is revoked: neither the thief's nor the real client's refresh token works, and the session's access tokens are refused within seconds.
 - Given a traveller signs out, when their access token is used on the next request, then it is refused even though it has not expired, their refresh token is refused, and their other devices are still signed in.
-- Given a registered email and an unregistered one, when "Forgot your password ?" is requested for each, then the responses are identical and only the registered email receives a message, and the same holds once the hourly limit is reached.
-- Given a reset code, when it is submitted on "Verify your e-mail", then it is refused. The same applies to a verification code submitted as a reset code.
+- Given a registered email and an unregistered one, when password recovery is requested for each, then the responses are identical and only the registered email receives a message, and the same holds once the hourly limit is reached.
+- Given a reset code, when it is submitted for email verification, then it is refused. The same applies to a verification code submitted as a reset code.
 - Given a new password that is identical to the current one, weak, or not matching its confirmation, when it is submitted, then it is refused on that field, and the reset can still be completed afterwards with an acceptable password.
-- Given a completed reset, when the traveller signs in, then the old password fails and the new one works, and every other device, including a phone signed in with a PIN, is signed out within seconds.
+- Given a completed reset, when the traveller signs in, then the old password fails and the new one works, and every other device, including a phone signed in with a PIN, is signed out within seconds: its tokens and its device credential are refused.
 - Given Redis is unavailable, when sign-in attempts arrive, then they behave as the cache plan documents and failed attempts are never unlimited.
 - Given a day of sign-ins, refreshes and resets, when every service's logs are searched, then no password, access token, refresh token or code appears.
 
@@ -641,34 +677,47 @@ As a frequent traveller
 I want to open the app with a 4-digit PIN or my fingerprint instead of my password
 So that booking my weekend train takes seconds, without making my account easier to steal
 
-### User flow (see Figma)
+### Service flow
 Services: identity (accountable: device credentials, PIN hashes, wrong-PIN counting, revocation), gateway (the public PIN sign-in route and its rate limit).
 
-After the first sign-in on a phone (via AUTH-2 verification or AUTH-3 sign in):
-  Create PIN: "Set a PIN to secure your account." — 4 boxes
-  -> Confirm PIN: "Set a PIN to secure your account." — 4 boxes
-  -> Home
+Register a phone (after a sign-in on it, through AUTH-2 verification or AUTH-3 sign in)
+  a signed-in client submits a 4-digit PIN and its confirmation
+  -> gateway: traveller route
+  -> identity checks that the two match, issues a credential bound to this device, stores the
+     PIN only as a hash, replaces any earlier credential for this device and account, and
+     records "a device was registered for PIN sign-in"
+  -> the client keeps the device credential on the phone
 
-On every later launch on that phone:
-  Enter your PIN — 4 boxes and a keypad, "Forgot Your PIN Code?"
-  or the iOS prompt: Touch ID for "ENR" — "Authenticate to sign in"
-  -> Home, signed in
+PIN sign-in, on every later launch on that phone
+  a client submits the device credential and the PIN
+  -> gateway: public PIN sign-in route, rate limit
+  -> identity checks that the credential is live, then the PIN, counting wrong PINs atomically
+  -> right PIN: a session tied to this device, exactly as AUTH-3 issues one
+  -> fifth wrong PIN: the credential is revoked, "a device credential was revoked" is recorded,
+     and the response tells the client that the password is required
 
-"Forgot Your PIN Code?" -> Sign in with email and password (AUTH-3) -> Create PIN -> Confirm PIN -> Home.
+Touch ID or Face ID instead of the PIN
+  the client unlocks its stored device credential locally with the phone's biometrics and
+  signs in with it -> the server sees only the device credential, never a fingerprint, a face
+  or a biometric result, and refuses a revoked credential as above
+
+Forgotten PIN
+  a password sign-in (AUTH-3), then a new registration: the new credential replaces the old one,
+  and the old PIN stops working
 
 The research is why this feature exists: the frequent traveller "felt satisfied and comfortable
 using biometrics to log in". The rule is what makes it safe: the PIN protects one phone, not
 the account (D12).
 
 ### Rules and validations
-- One device, one credential (BR-07, D12): Creating a PIN registers this phone. identity issues a credential bound to this device and stores the PIN only as a hash. The PIN means nothing without that device credential, so typed on any other phone it is useless.
+- One device, one credential (BR-07, D12): Creating a PIN registers this phone. identity issues a credential bound to this device and stores the PIN only as a hash. The PIN means nothing without that device credential, so submitted from any other phone it is useless.
 - Hard to brute-force offline: A 4-digit PIN has 10,000 possible values, and a plain hash of it can be reversed in milliseconds. Store it so that a copy of identity's database alone is not enough to test the 10,000 values: bind it to the device's secret, or to a key the database does not hold.
 - Exactly 4 digits: Leading zeros are allowed. The confirmation must match before anything is stored.
 - Signed in to register: Only a signed-in traveller can register a device. There is one credential per device per account, and registering again replaces the previous one.
 - PIN sign-in issues a normal session: The device credential plus the right PIN gives the same access and refresh tokens as AUTH-3, tied to that device. A PIN never replaces the password on a new phone.
 - Five wrong PINs (BR-07): The fifth wrong PIN revokes that device's credential, and from then on that phone needs the password and a new PIN. A right PIN resets the count. The count is atomic, so five wrong PINs sent at once cannot turn into six chances.
-- Biometrics stay on the phone (BR-07): Touch ID or Face ID unlocks the same device credential on the phone. No fingerprint, face or biometric result ever reaches the server, and the API has no field that could carry one. A revoked credential cannot be opened with a fingerprint either.
-- Forgot PIN: "Forgot Your PIN Code?" means a password sign-in followed by a new PIN. The new PIN replaces the old credential, and the old PIN stops working.
+- Biometrics stay on the phone (BR-07): Touch ID or Face ID unlocks the same device credential on the phone, and the client signs in with that credential. No fingerprint, face or biometric result ever reaches the server, and the API has no field that could carry one. A revoked credential is refused however the phone unlocked it.
+- Forgot PIN: PIN recovery is a password sign-in (AUTH-3) followed by a new PIN registration. The new PIN replaces the old credential, and the old PIN stops working.
 - What revokes a device: Five wrong PINs, signing out on that phone (AUTH-3), or a password reset, which revokes every device on the account (§6.1).
 - Lockout does not lock the phone: The password lockout of BR-04 does not block PIN sign-in on a registered phone, which has its own five-attempt limit. That way, someone hammering the password cannot lock the real traveller out of their own phone.
 - Your devices only: A device credential belongs to one account. Acting on another account's device gets a 404 (BR-09).
@@ -681,34 +730,35 @@ the account (D12).
 ### Edge cases to handle
 - The traveller signs in on a second phone. The PIN from the first phone must not be valid there (§6.1).
 - The traveller resets their password while their lost phone is still set up with a PIN (§6.1).
-- The app is reinstalled on the same phone. The device credential on the phone is gone, so the traveller signs in with the password and sets a new PIN.
+- The client is reinstalled on the same phone. The device credential it held is gone, so the traveller signs in with the password and registers a new PIN.
 - Five wrong PINs arrive in parallel from a scripted client.
 - Four wrong PINs, then the right one, then four more wrong ones.
 
 ### Acceptance criteria
 
-- Given a signed-in traveller on phone A, when they create and confirm a PIN, then phone A has a device credential and the PIN is stored only as a hash.
+- Given a signed-in traveller on phone A, when the client registers phone A with a PIN and a matching confirmation, then phone A receives a device credential and identity stores the PIN only as a hash.
 - Given a PIN and a confirmation that differ, when they are submitted, then nothing is registered and the error names the confirmation.
-- Given phone A with a PIN, when the app is reopened and the right PIN entered, then the traveller is signed in without the password, with a new session tied to phone A.
-- Given phone A's PIN typed on phone B for the same account, when it is submitted, then it is refused, and phone B must sign in with the password.
+- Given phone A with a PIN, when the client signs in with phone A's device credential and the right PIN, then a new session tied to phone A is issued without the password.
+- Given phone A's PIN submitted from phone B for the same account, without phone A's device credential, when it is submitted, then it is refused, and phone B must sign in with the password.
 - Given 4 wrong PINs followed by the right one, when the right one is submitted, then sign-in succeeds and the count starts again.
-- Given 5 wrong PINs on phone A, when the right PIN is entered next, then it is refused and the app is told the password is required.
+- Given 5 wrong PINs on phone A, when the right PIN is submitted next, then it is refused and the response tells the client the password is required.
 - Given 5 wrong PINs sent at the same instant, when all of them complete, then the credential is revoked and no sixth attempt is ever evaluated, proven by a concurrent test.
-- Given a revoked device credential, when the app tries to sign in through the Touch ID unlock, then sign-in is refused.
-- Given the traveller signs out on phone A, when the PIN is entered on the next launch, then it is refused and the password is required.
-- Given a password reset made on another phone, when phone A enters its right PIN, then it is refused.
-- Given "Forgot Your PIN Code?" followed by a password sign-in and a new PIN, when the old PIN is entered, then it is refused, and the new PIN works.
-- Given an account locked by 10 failed passwords, when phone A enters its right PIN, then the traveller is signed in.
+- Given a revoked device credential, when the client signs in with it after a biometric unlock, with no PIN, then sign-in is refused.
+- Given the traveller signs out on phone A, when the client then signs in with phone A's device credential and the right PIN, then it is refused and the response says the password is required.
+- Given a password reset made on another phone, when phone A signs in with its device credential and its right PIN, then it is refused.
+- Given a password sign-in on phone A followed by a new PIN registration, when the old PIN is submitted, then it is refused, and the new PIN works.
+- Given an account locked by 10 failed passwords, when phone A signs in with its device credential and its right PIN, then a session is issued.
 - Given identity's database alone, when it is inspected, then no PIN is readable and the stored values cannot be checked against the 10,000 possible PINs without the device or a key held elsewhere. No PIN appears in any log.
 
 ---
 
 ## Explicitly out of scope for Sprint 1
 
-- **Complete your profile, the National ID and saved passengers.** These come in Sprint 2 (AUTH-5, AUTH-6). The bookable-traveller level exists from AUTH-1, but nothing makes a traveller bookable until AUTH-5.
-- **Settings → Profile.** This arrives with AUTH-5. Settings → Logout is covered by AUTH-3 in this sprint.
+- **The mobile app and any client UI.** They are not built in this project. The Figma screens show what the API must make possible.
+- **Profile completion, the National ID and saved passengers.** These come in Sprint 2 (AUTH-5, AUTH-6). The bookable-traveller level exists from AUTH-1, but nothing makes a traveller bookable until AUTH-5.
+- **Reading and editing the profile (Settings → Profile in the design).** This arrives with AUTH-5. Signing out (Settings → Logout) is covered by AUTH-3 in this sprint.
 - **Idempotency-Key responses at the gateway** (§2.3). These arrive with the first request that moves money (Sprints 3–4). The Redis rules of AUTH-1 are the pattern to follow.
 - **Push notifications, the in-app inbox and the unread count.** These come in Sprint 5. Verification and reset codes are email-only and never stored in the inbox (BR-53), so this sprint needs none of them.
 - **Tracing, circuit breakers and dead-letter replay.** These come in Sprint 5. They build on the correlation ID from PLAT-2 and the replayable dead-letter queue from PLAT-3.
 - **The Stripe CLI forwarder in Compose.** This arrives in Sprint 4.
-- **Social sign-in, a "sign out everywhere" button, changing your email or password while signed in, account deletion and data export.** None of these is in the design. A password reset is the only thing that signs a traveller out everywhere.
+- **Social sign-in, a "sign out everywhere" action, changing your email or password while signed in, account deletion and data export.** None of these is in the design. A password reset is the only thing that signs a traveller out everywhere.

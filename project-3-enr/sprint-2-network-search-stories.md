@@ -10,13 +10,15 @@
 
 ## How to read these stories
 
-Each story describes **a user flow across real screens** — or, for the platform and operations stories that have no screen, the developer's or operator's flow — then lists the rules that flow must obey, the events it publishes, the edge cases it must survive, and the acceptance criteria you will be graded on.
+Each story describes **a service flow**: the request a client makes — the mobile app, an operator tool or a test script — the services involved and what each one does, or, for the platform stories no client calls directly, the job or the developer's flow. Then it lists the rules that flow must obey, the events it publishes, the edge cases it must survive, and the acceptance criteria you will be graded on.
 
-What you will **not** find here: endpoint paths, request bodies, table or column names, queue names, routing keys or `.proto` definitions. Those are your design work — derive them from the flow, the rules and the Figma screens. If a story says *"the refusal sends the app to Complete your profile"*, deciding **how** you express that is part of the exercise.
+**No client UI is built in this project.** The Figma design shows what the API must make possible — the data a client needs at each step and the refusals it must be able to explain — not screens to deliver.
+
+What you will **not** find here: endpoint paths, request bodies, table or column names, queue names, routing keys or `.proto` definitions. Those are your design work — derive them from the flow, the rules and what the Figma screens need from the API. If a story says *"the refusal tells the client the profile must be completed first"*, deciding **how** you express that is part of the exercise.
 
 Each story lists **domain events to publish**, named in plain language (*"a trip was published"*) rather than as routing keys, because the event catalogue — names, payloads, versions and consumers — is your deliverable (requirements §8). Next to each event is who consumes it and why. An event with no consumer is a question to answer, not a default.
 
-**Every story starts its User flow with a `Services:` line** naming the services involved and the role each one plays. The owner of the **first-listed** service is accountable for the story — its design, its tests and its demo — even when teammates write parts of it.
+**Every story starts its Service flow with a `Services:` line** naming the services involved and the role each one plays. The owner of the **first-listed** service is accountable for the story — its design, its tests and its demo — even when teammates write parts of it.
 
 **What is different about this sprint.** Sprint 1 built the platform and the front door. Sprint 2 builds what travellers actually come for — the network and the search over it — and it is graded on three things that look easy and are not:
 
@@ -62,14 +64,14 @@ Keep the file order — the Epic row must import first. Dry-run on a sandbox pro
 | CAT-1 | Stations — a bilingual network you can find however you type it | 5 |
 | CAT-2 | Trains, timetables, dated trips and fares — the model every seat will belong to | 5 |
 | CAT-3 | One-way search — any two stops, in travel order, on a Cairo date | 8 |
-| CAT-4 | Round trip, filters, sorting, the stops timeline and recent searches | 5 |
+| CAT-4 | Round trip, filters, sorting, a trip's stops and recent searches | 5 |
 | CAT-5 | The cache layer — fast answers from Redis, correct answers from Postgres | 5 |
 | OPS-1 | Operations API — publishing timetables and changing fares without rewriting history | 3 |
 
 ### Suggested order
 
 ```
-CAT-1  Stations + picker               ── a train cannot stop at a station that does not exist
+CAT-1  Stations + station search       ── a train cannot stop at a station that does not exist
    │
    └─▶ CAT-2  Trains, timetables, trips, fares   ◀── the model Sprints 3–5 stand on
           │
@@ -103,13 +105,13 @@ AUTH-5  Complete profile ──▶ AUTH-6  Saved passengers        (identity —
 | S2 — catalog | CAT-2 and OPS-1 — and the review of almost every PR this sprint | 8 |
 | S3 — inventory | CAT-5, plus CAT-4's recent searches (the per-user cache rule). Next sprint S3 feeds the availability keys from inventory's own events (SEAT-4) — so S3 designs those keys now | 7 |
 | S4 — booking | CAT-3. In Sprint 3 booking asks catalog for a fare quote; whoever built search understands fares and segments best | 8 |
-| S5 — payment + notification | CAT-1 · CAT-4's round trip, filters, sort and stops timeline · the notification consumer of the profile-completed event | 8 |
+| S5 — payment + notification | CAT-1 · CAT-4's round trip, filters, sort and trip stops · the notification consumer of the profile-completed event | 8 |
 
 This sprint is catalog-heavy. **The owner of a service reviews every pull request that touches it** — S2 will review most of the sprint, so S2's own load is kept to the model and the operations path.
 
 ### Definition of Done (every story)
 
-- Every rule is enforced **in the service that owns it** — not in the gateway, not in the app. The gateway validates the shape of a request; the owner decides.
+- Every rule is enforced **in the service that owns it** — not in the gateway, not in the client. The gateway validates the shape of a request; the owner decides.
 - Every acceptance criterion has a test, including the negative and boundary ones and, where stated, a **concurrent** one.
 - Every edge case listed has a deliberate, defined behaviour — even if that behaviour is "refuse with this code".
 - Every event is written to the **outbox in the same transaction** as the change it announces; every consumer is **idempotent** (inbox); a failing message is retried with backoff and then **dead-lettered**, never dropped.
@@ -132,11 +134,12 @@ and the dated trips generated from them, fares per train, class and pair of stat
 search over all of it, the cache that makes search fast without making it wrong, and the
 first operations path that lets ENR publish timetables and change fares.
 
-Source of truth: the Figma Complete your profile, Passengers tab, Home (One way, Round trip,
-with Train Number), station picker, Calendar, Results with the date strip, Stops timeline and
-Results (No result) screens, the "+ Add new passenger" entry of Choose Passengers, and the
-"Recent Search" wireframe — plus sections 2.3, 4 (Modules 2, 3, 4 and 9), 5.2, 5.3, 5.8
-(BR-50 to BR-52), 6.2, 6.3, 7.2 (Q3, Q4) and rulings D1, D2 and D4 of the requirements.
+Source of truth: sections 2.3, 4 (Modules 2, 3, 4 and 9), 5.2, 5.3, 5.8 (BR-50 to BR-52),
+6.2, 6.3, 7.2 (Q3, Q4) and rulings D1, D2 and D4 of the requirements. The Figma Complete your
+profile, Passengers tab, Home (One way, Round trip, with Train Number), station picker,
+Calendar, Results with the date strip, Stops timeline and Results (No result) screens, the
+add-passenger entry of Choose Passengers and the "Recent Search" wireframe are context for
+what the API must make possible, not deliverables.
 
 Depends on Sprint 1: the gateway, verified accounts and sessions, the envelope and error
 codes, the outbox and inbox, and the cache plan reviewed at the design gate.
@@ -149,9 +152,9 @@ hold with the fares modelled here.
 
 - A traveller can complete their profile or skip it, and whether they are bookable is decided in exactly one place.
 - A traveller can save up to 10 passengers, and nobody else can see, change or delete them.
-- Any station can be found by typing it in Arabic or English, however it is spelled.
-- Any two stops of a trip, in travel order, on a Cairo date, return correct cards — times, dates, duration, stops, seats and fare — including overnight trains and the daylight saving nights.
-- Round trip, filters, sorting, the stops timeline and recent searches behave as designed.
+- Any station can be found by a query in Arabic or English, however it is spelled.
+- Any two stops of a trip, in travel order, on a Cairo date, return correct results — times, dates, duration, stops, seats and fare — including overnight trains and the daylight saving nights.
+- Round trip, filters, sorting, a trip's stops and recent searches behave as BR-18, BR-20 and BR-21 define.
 - Searches are served from Redis when warm and from Postgres when Redis is down; 200 simultaneous searches on a cold key cause one database rebuild.
 - An operator can publish a timetable and change a fare; every action is audited, and every dated trip is published through the outbox ready for Sprint 3's inventory.
 - Search p95 latency is measured warm and cold on a seed big enough to mean something.
@@ -167,42 +170,47 @@ As a traveller who signed up with only an email and a password
 I want to give my name, phone number and National ID once, when I am ready
 So that I can book later without filling the same form again
 
-### User flow (see Figma)
+### Service flow
 Services: identity (owner — profile, National ID and phone rules, the self passenger, the bookable state), gateway (REST edge; the "bookable traveller" access rule), notification (consumes the profile-completed event).
 
-After the email is verified (Sprint 1) -> Complete your profile:
+After the email is verified (Sprint 1), the traveller completes the profile — or skips it:
 
-  "Complete your profile"
-  "You'll need this info to book later."
-  Full name
-  Phone number        a fixed "EG +20" prefix, then the mobile number
-  National ID         14 digits
-  Profile Type        "(Currently available: Regular)"
-  Nationality         "Egypt (Available for Egyptian users only)"
-  Confirm · Skip
+  client -> gateway: complete the profile of the signed-in account — full name, mobile
+            number, National ID, profile type, nationality
+    -> identity (gRPC): validate every field, normalize the digits and the phone, then in one
+       transaction: complete the profile, create (or adopt) the self passenger, and write
+       "a traveller's profile was completed" to the outbox
+    <- the completed profile, and the traveller is bookable from the next request;
+       or field-level errors naming each field, in the requested language
+  outbox -> notification: the account and the name ("Ahmed Hussein")
 
-Confirm -> Home ("Hello Ahmed Hussein"). Skip -> Home, signed in but not yet bookable.
-Settings -> Profile reads the same data back.
+  Skipping stores nothing: the traveller stays signed in but not bookable, and can complete
+  the profile later.
+
+  client -> gateway -> identity: read the profile — the same data back, the phone and the
+            National ID in full to their owner only
+  client -> gateway -> identity: the profile types and nationalities accepted today
+            (Regular, Egyptian)
 
 Skip exists because of the research: "Not all users want to provide their full 14-digit
 National ID just to create an account." The redesign moved the National ID out of sign-up
-and into "Complete Profile later!" (D4). The price of that freedom is that the system now
+and into a later profile step (D4). The price of that freedom is that the system now
 has two kinds of signed-in traveller, and has to tell them apart in exactly one place.
 
 ### Rules and validations
-- Three required facts: Full name, an Egyptian mobile number and a National ID (BR-10). Profile Type and Nationality are shown with one value each — Regular and Egyptian (BR-13). Only those values are accepted, each other value is refused with its own code, and both are kept as data the dropdowns read from identity, so "Student" or a second nationality later is a new row, not a migration.
+- Three required facts: Full name, an Egyptian mobile number and a National ID (BR-10). Profile type and nationality have one value each today — Regular and Egyptian (BR-13). Only those values are accepted, each other value is refused with its own code, and both are kept as data a client reads from identity, so "Student" or a second nationality later is a new row, not a migration.
 - Full name: Trimmed, inner spaces collapsed, Arabic or Latin letters, at least a first and a family name. It will be printed on tickets — decide the maximum length and document it.
-- National ID structure (BR-11): Exactly 14 digits; the first is the century (`2` = 1900s, `3` = 2000s); the next six are a real birth date (YYMMDD) that is not in the future; the two after that are a known governorate code. Each failure has its own code so the app can say exactly what is wrong. Decision: no check-digit test — its algorithm is not officially published, and a wrong guess would reject real people.
-- Arabic digits: A National ID or phone typed on an Arabic keyboard (٠–٩) is accepted and normalized to the same value as its Western-digit form.
+- National ID structure (BR-11): Exactly 14 digits; the first is the century (`2` = 1900s, `3` = 2000s); the next six are a real birth date (YYMMDD) that is not in the future; the two after that are a known governorate code. Each failure has its own code so the response says exactly what is wrong. Decision: no check-digit test — its algorithm is not officially published, and a wrong guess would reject real people.
+- Arabic digits: A National ID or phone submitted in Arabic digits (٠–٩) is accepted and normalized to the same value as its Western-digit form.
 - The design's own sample is invalid: `26582264865` has 11 digits and is refused with the length code (§6.2). Seed and test data use synthetic, structurally valid IDs — never a real person's.
 - Identity's governorate codes are its own: The codes inside a National ID are part of identity's validation. Do not call catalog — which groups stations by governorate — to validate an ID: two services, two purposes, no runtime dependency.
-- Phone normalization (BR-10): An Egyptian mobile number is `010`, `011`, `012` or `015` followed by 8 digits. `01001234567`, `+201001234567`, `00201001234567` and `1001234567` typed after the +20 prefix are the same number, stored in one canonical form. Decision: the number is checked for format and uniqueness, not ownership — there is no SMS channel in this project.
+- Phone normalization (BR-10): An Egyptian mobile number is `010`, `011`, `012` or `015` followed by 8 digits. `01001234567`, `+201001234567`, `00201001234567` and `1001234567` (the number without its leading 0, as a client with a fixed +20 prefix sends it) are the same number, stored in one canonical form. Decision: the number is checked for format and uniqueness, not ownership — there is no SMS channel in this project.
 - Unique where the rules say (BR-10, BR-12): The mobile number is unique across accounts. The National ID is unique across **account holders** (self passengers) — not across saved passengers. Both guarantees live in the database: two accounts claiming the same ID at the same instant cannot both succeed.
 - Completing creates the self passenger: One transaction completes the profile and creates the traveller's own passenger with the same name, National ID and type (BR-10). Decision: if that National ID is already one of this traveller's saved passengers (they added themselves earlier), that entry becomes the self passenger — the list never holds the same ID twice (BR-12).
 - Skip is allowed and harmless: Skipping stores nothing. A traveller who skipped can still search, save passengers and, later, save cards. Only holding a seat needs the profile (BR-10, D4).
-- Bookable is one fact with one home (D4): Identity decides whether an account is bookable, and the system expresses it so that the "bookable traveller" access rule in your endpoint table is enforced at one point, not re-checked in every handler. Sprint 3's hold is the first endpoint behind it; this sprint builds and tests the rule. A refused request carries a *profile incomplete* code that sends the app to Complete your profile.
-- Takes effect now: After Confirm, the traveller is bookable on their very next request, without signing out and in. If "bookable" travels inside the access token, decide how a token issued before completion stops saying "not bookable".
-- Completed once: A second Confirm on a complete profile is refused with a *profile already complete* code. Later changes go through the self passenger (AUTH-6) under the same uniqueness rules — the profile edit screen itself is not designed (Appendix A).
+- Bookable is one fact with one home (D4): Identity decides whether an account is bookable, and the system expresses it so that the "bookable traveller" access rule in your endpoint table is enforced at one point, not re-checked in every handler. Sprint 3's hold is the first endpoint behind it; this sprint builds and tests the rule. A refused request carries a *profile incomplete* code that tells the client the profile must be completed first.
+- Takes effect now: Once the profile is completed, the traveller is bookable on their very next request, without signing out and in. If "bookable" travels inside the access token, decide how a token issued before completion stops saying "not bookable".
+- Completed once: A second completion request on a complete profile is refused with a *profile already complete* code. Later changes go through the self passenger (AUTH-6) under the same uniqueness rules — a separate profile edit is not designed (Appendix A).
 - Sensitive data (§7.2 Q9): The phone number and National ID are returned in full only to their owner, never appear in a log (mask them), and never travel in an event. Decide whether they are encrypted at rest — and if so, how the uniqueness rules above still work.
 - Verified travellers only (BR-01, BR-05): An unverified account cannot complete a profile.
 
@@ -212,28 +220,28 @@ has two kinds of signed-in traveller, and has to tell them apart in exactly one 
 ### Edge cases to handle
 - The design's sample `26582264865` (11 digits); a birth date of 31 February; governorate code `99`; century digit `3` with a birth date later this year (§6.2).
 - Two accounts claim the same National ID as their "self" at the same second (§6.2).
-- The phone is typed as `+20 100 123 4567` with spaces, or in Arabic digits.
+- The phone arrives as `+20 100 123 4567` with spaces, or in Arabic digits.
 - A traveller who saved themselves as a passenger before completing the profile.
 - A traveller with 10 saved passengers completes the profile.
-- Someone enters a phone number that already belongs to another account — what does the message reveal about that account?
-- A traveller who skipped opens Home — decide what "Hello Ahmed Hussein" shows when there is no name.
+- Someone submits a phone number that already belongs to another account — what does the message reveal about that account?
+- A traveller who skipped reads their profile — decide what the response carries in place of the name (the design greets "Hello Ahmed Hussein") when there is none.
 - Identity commits the profile, then RabbitMQ is down — the event must still reach notification later.
 
 ### Acceptance criteria
 
-- Given a verified traveller with no profile, when they confirm a valid name, phone and National ID, then the profile is complete, a self passenger exists with the same name and National ID, and the traveller is bookable on their next request without signing in again.
+- Given a verified traveller with no profile, when they submit a valid name, phone and National ID, then the profile is complete, a self passenger exists with the same name and National ID, and the traveller is bookable on their next request without signing in again.
 - Given the National ID `26582264865`, when it is submitted, then it is refused with the length code and the National ID field named.
 - Given National IDs with 31 February, a future birth date, century digit `4` or governorate `99`, when each is submitted, then each is refused with its own code.
-- Given a valid National ID typed in Arabic digits, when it is submitted, then it is accepted and stored identically to its Western-digit form.
+- Given a valid National ID in Arabic digits, when it is submitted, then it is accepted and stored identically to its Western-digit form.
 - Given `01001234567` on one account, when another account submits `+201001234567`, then it is refused as a phone already in use, without revealing anything about the other account.
 - Given two accounts submit the same National ID as their self at the same instant, when both complete, then exactly one succeeds and the other receives the *National ID in use* code — proven by a concurrent test.
-- Given the same traveller double-taps Confirm, when both requests complete, then exactly one profile, one self passenger and one event exist.
+- Given the same traveller submits the profile twice at once, when both requests complete, then exactly one profile, one self passenger and one event exist.
 - Given a traveller who skipped, when they search or save a passenger, then it works; when a request reaches an endpoint carrying the "bookable traveller" rule, then it is refused with the *profile incomplete* code — proven this sprint with a test.
 - Given a profile type other than Regular or a nationality other than Egyptian, when submitted, then it is refused with a specific code.
 - Given a traveller who saved their own National ID as a passenger earlier, when they complete the profile, then that passenger becomes the self passenger and the ID appears once in their list.
 - Given a completed profile, when the event is inspected, then it contains no phone number and no National ID; and when the logs of every service are searched, then neither appears in full.
-- Given a complete profile, when Confirm is sent again, then it is refused with *profile already complete*.
-- Given RabbitMQ is down at the moment of Confirm, when it comes back, then notification receives the event exactly once.
+- Given a complete profile, when the completion request is sent again, then it is refused with *profile already complete*.
+- Given RabbitMQ is down at the moment the profile is completed, when it comes back, then notification receives the event exactly once.
 
 ---
 
@@ -246,33 +254,33 @@ As a traveller who books for family and friends
 I want their names and National IDs saved once
 So that booking for them is a tap, not a form (research: frequent users re-enter details every time)
 
-### User flow (see Figma)
+### Service flow
 Services: identity (owner — saved passengers and their rules), gateway (REST edge; someone else's passenger is a 404).
 
-Bottom nav -> Passengers:
+  client -> gateway -> identity (gRPC): the signed-in traveller's passengers
+    <- the whole list, self first, then the others in a documented order; per passenger the
+       full name ("Omar Khaled Hassan"), the National ID in full, the type named in the
+       requested language ("Regular" / "كوامل"), and whether it is the self passenger
 
-  one row per passenger:
-    "Omar Khaled Hassan"
-    type "Regular"            (Arabic: "كوامل")
-    "الرقم القومي/26582264865"
-    Edit · Delete
-  "Add passenger"
+  client -> gateway -> identity (gRPC): add, edit or delete a passenger — full name,
+            National ID, type (Regular)
+    identity: AUTH-5's name and National ID rules, the limit, one National ID per list,
+              ownership
+    <- the saved passenger; or a field-level error naming the field; or a 404 for
+       someone else's passenger
 
-Add and Edit ask for the full name, the National ID and the type (Regular).
-
-The same add is reachable from the booking flow: Results -> pick a trip -> Choose Passengers
--> "+ Add new passenger". It is the same rule set: a passenger added there appears in the
-Passengers tab and the other way round. Selecting up to four of them for a booking is
-Sprint 3 (BOOK-1).
+The design offers the same add in two places — the Passengers tab and, during a booking,
+Choose Passengers. It is one request against one list: a passenger added through either is
+in the list both read. Selecting up to four of them for a booking is Sprint 3 (BOOK-1).
 
 Look at the National ID in the design: `26582264865` again — 11 digits. Your API refuses it.
 
 ### Rules and validations
 - What a passenger is: A full name, a National ID and a type (BR-12), validated with exactly the same name and National ID rules as AUTH-5 (BR-11), Arabic digits included. One implementation, not two.
-- Up to 10 (BR-12): A traveller saves up to 10 passengers. Decision: the self passenger does not count — it is created by the profile, not saved — so a full list is 10 plus self. The eleventh is refused with a code that tells the app the limit.
+- Up to 10 (BR-12): A traveller saves up to 10 passengers. Decision: the self passenger does not count — it is created by the profile, not saved — so a full list is 10 plus self. The eleventh is refused with a code that tells the client the limit.
 - The limit holds under concurrency: Two adds at the same instant on a list of 9 leave 10, not 11. The guarantee lives in the database, not in a count followed by an insert.
 - Once per list, shareable across lists (BR-12): A National ID appears at most once in one traveller's list, but two travellers may both save the same person. The uniqueness is per account and enforced by the database — on add and on edit.
-- The self passenger: Appears first, is marked as the traveller themself, and cannot be deleted (BR-12). Its name and National ID are the profile's — one fact, one place: editing the self row is how the profile changes, under AUTH-5's rules (the ID stays unique across account holders).
+- The self passenger: Appears first, is marked as the traveller themself, and cannot be deleted (BR-12). Its name and National ID are the profile's — one fact, one place: editing the self passenger is how the profile changes, under AUTH-5's rules (the ID stays unique across account holders).
 - The self ID lock (BR-12): The self passenger's National ID cannot change once a ticket was issued for it. Tickets live in booking (Sprint 4), so identity has to learn it from there — decide how (an event identity consumes, or a question it asks) and build the rule now. Until Sprint 4 the answer is always "no ticket".
 - Tickets keep their own copy (BR-12, BR-37): Editing or deleting a passenger never changes a ticket already issued. No other service may hold a reference it expects identity to keep alive.
 - Types are data (BR-13): Only Regular today, returned with its name in the requested language ("Regular" / "كوامل"). A discounted type later is a new row, not a migration of existing passengers.
@@ -288,20 +296,20 @@ Look at the National ID in the design: `26582264865` again — 11 digits. Your A
 - One traveller saves the same National ID twice; a different traveller saves the same person (§6.2).
 - A passenger is edited after a ticket was issued for them — what does the ticket show? (§6.2 — its own copy, from Sprint 4.)
 - A passenger's National ID is edited to one already in the same list.
-- Two phones add the 10th and the 11th passenger at the same second.
+- Two clients of the same traveller add the 10th and the 11th passenger at the same second.
 - A crafted request tries to delete the self passenger.
-- A passenger is deleted on one phone while selected in an open Choose Passengers modal on another.
+- A passenger is deleted by one client while another client, which read the list a moment earlier, still holds its identifier for a booking (from Sprint 3, a hold names it).
 - A traveller who never completed the profile saves passengers, later adds their own National ID, then completes the profile (AUTH-5 merges it).
 
 ### Acceptance criteria
 
-- Given a traveller with 3 saved passengers, when they add a valid one, then it appears in the Passengers tab and in the list Choose Passengers reads.
+- Given a traveller with 3 saved passengers, when they add a valid one, then it appears in their passenger list — the one list both the Passengers tab and Choose Passengers read.
 - Given a traveller with a self passenger and 10 saved passengers, when they add an 11th, then it is refused with the limit code.
 - Given a list of 9, when two adds arrive at the same instant, then exactly one succeeds and the list holds 10 — proven by a concurrent test.
 - Given a National ID already in the traveller's list, when it is added again or another passenger is edited to it, then it is refused with the duplicate code naming the National ID field.
 - Given traveller A saved a person, when traveller B saves the same National ID, then it succeeds.
 - Given the self passenger, when deleting it is attempted, then it is refused with a code saying it cannot be deleted.
-- Given the self passenger's name is edited, when the profile is read, then it shows the same name.
+- Given the self passenger's name is edited, when the profile is read, then it returns the same name.
 - Given the self passenger's National ID is edited to one that another account holder uses as their self, then it is refused (BR-10).
 - Given traveller A's passenger, when traveller B reads, edits or deletes it, then the answer is 404 and the passenger is unchanged.
 - Given `26582264865` or any structurally invalid National ID, when a passenger is added, then it is refused with the same codes AUTH-5 uses.
@@ -319,49 +327,39 @@ As a traveller choosing where to travel from and to
 I want to find my station by typing it the way I type it — Arabic or English, with or without the hamza
 So that the first step of every trip never fails me
 
-### User flow (see Figma)
+### Service flow
 Services: catalog (owner — stations, governorates, search normalization, the station-list cache), gateway (REST edge; the requested language).
 
-Home -> From "Select Departure Station" (or To "Select Arrival Station") -> a bottom sheet:
+  client -> gateway -> catalog (gRPC): the station list in the requested language,
+            optionally narrowed by a query ("alex", "اسكندريه")
+    catalog: the list from Redis (cache-aside) or Postgres; a query is normalized (BR-22)
+             and matched against station names, alternative spellings, cities and governorates
+    <- governorates in a documented order, each with its active stations, every name in the
+       requested language — the whole grouped list in one response; or a well-formed
+       empty list
 
-  "Select one"
-  Search
-  Cairo
-  Giza
-  Alexandria
-  Qalyubia
-  Monufia
-  Beheira
-  Kafr El Sheikh
-  Dakahlia
-  Sharqia
-  Gharbia
-  Ismailia
-  Damietta
-  ...
-  (a check mark on the selected one)
+The same list serves both the origin and the destination.
 
-Tap one -> the sheet closes and the field shows it. The ⇅ button between From and To swaps them.
-
-Look at that list: those are governorates, not stations. Alexandria has two stations a
-traveller boards at (Sidi Gaber and El Raml); Cairo has Ramsis. The requirements ask for
-stations "grouped the way the design's station picker shows them" — so governorates are the
-groups and stations are the choices.
+The design's station picker lists Cairo, Giza, Alexandria, Qalyubia, Monufia, Beheira,
+Kafr El Sheikh, Dakahlia, Sharqia, Gharbia, Ismailia, Damietta… — those are governorates,
+not stations. Alexandria has two stations a traveller boards at (Sidi Gaber and El Raml);
+Cairo has Ramsis. The requirements ask for stations "grouped the way the design's station
+picker shows them" — so governorates are the groups and stations are the choices.
 
 ### Rules and validations
-- Bilingual: Every station, city and governorate has an Arabic and an English name (BR-56). A response uses the requested language throughout — never a mix of the two on one screen (research finding).
-- Grouped by governorate: The picker's list is governorates as headers with their stations under them, in a documented order that is the same in both languages (the design's order is not alphabetical — decide and keep it). Decision: a traveller picks a station, never a whole governorate.
-- Either language, whatever the screen language: A traveller whose app is in English and who types Arabic still finds the station, and the other way round. Results are named in the requested language.
+- Bilingual: Every station, city and governorate has an Arabic and an English name (BR-56). A response uses the requested language throughout — never a mix of the two in one response (research finding).
+- Grouped by governorate: The list is governorates, each with its stations, in a documented order that is the same in both languages (the design's order is not alphabetical — decide and keep it). Decision: an origin or a destination is always a station, never a whole governorate.
+- Either language, whatever the requested language: A query in Arabic with English as the requested language still finds the station, and the other way round. Results are named in the requested language.
 - Arabic normalization (BR-22): `أ إ آ → ا`, `ة → ه`, `ى → ي`, and diacritics (tashkeel) and the tatweel removed — applied identically to the stored names and to the query. Decision: a word's leading definite article "ال" is ignored too; otherwise "اسكندريه" never finds "الإسكندرية" (§6.3).
 - English (BR-22): Case-insensitive, punctuation and hyphens ignored ("Kafr El-Zayat" = "kafr el zayat"), matching from the start of any word — so "alex" finds Alexandria and "gaber" finds Sidi Gaber.
 - Spellings vary: Egyptian names have several English transliterations (Ramsis / Ramses, Assiut / Asyut, Banha / Benha). Decision: a station may carry alternative spellings that search also matches; the seed includes the common ones.
 - Wider than the station name: A query matches a station's own name, its city and its governorate, so "Alexandria" lists both Alexandria stations.
-- The query is text, not a pattern: A `%` or `_` typed by a user matches nothing special. An empty query returns the whole grouped list; an over-long one is refused with a field error.
+- The query is text, not a pattern: A `%` or `_` in the query matches nothing special. An empty query returns the whole grouped list; an over-long one is refused with a field error.
 - Only active stations: A closed station is not offered. A station that any trip still stops at is deactivated, never deleted.
-- Swap is free (BR-15): Swapping From and To is the app's job; the server treats the reversed pair as just another search. Every station offered is valid as both origin and destination. Decision: the To list is not filtered by From — an unreachable pair is answered by search with a reason (CAT-3).
-- A realistic seed, in both languages: at minimum Cairo – Alexandria (Ramsis, Banha, Tanta, Kafr El Zayat, Damanhour, Sidi Gaber, El Raml) and Cairo – Aswan (Ramsis, Giza, Beni Suef, Minya, Assiut, Sohag, Qena, Luxor, Aswan), plus at least one more line reaching the governorates the picker shows (for example Cairo – Zagazig – Ismailia – Port Said, or Tanta – Mansoura – Damietta). The design's names are kept for the stations it shows ("Ramsis Station", "El Raml Station"); its "Damnhour" is a typo — the catalog's name wins.
+- Swap is free (BR-15): Swapping From and To is the client's job; the server treats the reversed pair as just another search. Every station offered is valid as both origin and destination. Decision: the station list for To is not filtered by From — an unreachable pair is answered by search with a reason (CAT-3).
+- A realistic seed, in both languages: at minimum Cairo – Alexandria (Ramsis, Banha, Tanta, Kafr El Zayat, Damanhour, Sidi Gaber, El Raml) and Cairo – Aswan (Ramsis, Giza, Beni Suef, Minya, Assiut, Sohag, Qena, Luxor, Aswan), plus at least one more line reaching the governorates the design's station picker shows (for example Cairo – Zagazig – Ismailia – Port Said, or Tanta – Mansoura – Damietta). The design's names are kept for the stations it shows ("Ramsis Station", "El Raml Station"); its "Damnhour" is a typo — the catalog's name wins.
 - Cached (§2.3): The station list is owned by catalog, cached with a long, jittered TTL, and invalidated by the event that changes a station — not by waiting for the TTL. An Arabic request never receives the English list from the cache, or the other way round.
-- One response, not N: The picker's whole grouped list comes in one response, and the number of database round trips does not grow with the number of stations.
+- One response, not N: The whole grouped list comes in one response, and the number of database round trips does not grow with the number of stations.
 
 ### Domain events to publish
 - A station was added or changed (consumed by catalog's own cache invalidation in CAT-5, and from Sprint 4 by booking, which keeps its own copy of the station names it prints on tickets).
@@ -370,23 +368,23 @@ groups and stations are the choices.
 - "اسكندريه", "إسكندرية", "الاسكندرية" and "alex" (§6.3).
 - "سيدى جابر" typed with `ى`, "اسيوط" without the hamza, "الاقصر" against "الأقصر".
 - A query typed with tashkeel: "طَنْطَا".
-- The traveller types `%`.
+- The query is `%`.
 - A station is renamed while the list is cached.
-- Redis is down when the picker opens.
+- Redis is down when the station list is requested.
 - The request carries no language, or one the system does not support.
 
 ### Acceptance criteria
 
-- Given the seed, when the picker list is requested in English and then in Arabic, then both contain the same stations, grouped by governorate in the same order, each named in its language.
+- Given the seed, when the station list is requested in English and then in Arabic, then both contain the same stations, grouped by governorate in the same order, each named in its language.
 - Given the queries "اسكندريه", "إسكندرية", "الاسكندرية" and "alex", when each is searched, then each returns the Alexandria stations.
 - Given the queries "Ramses" and "Benha", when searched, then Ramsis and Banha are found.
 - Given the query "KAFR el-zayat", when searched, then Kafr El Zayat is found.
-- Given a query typed in Arabic while the requested language is English, when searched, then the stations are found and returned with their English names.
+- Given a query in Arabic while the requested language is English, when searched, then the stations are found and returned with their English names.
 - Given the query `%`, when searched, then a well-formed empty result is returned — not every station.
 - Given a query that matches nothing, when searched, then a well-formed empty list is returned, not an error.
-- Given the station list is cached, when a station is renamed through catalog, then the next request shows the new name without waiting for the TTL.
+- Given the station list is cached, when a station is renamed through catalog, then the next request returns the new name without waiting for the TTL.
 - Given a warm cache, when the list is requested, then no database query runs; given Redis is stopped, then the list is still returned, from the database.
-- Given a deactivated station, when the picker list is requested, then it is not offered.
+- Given a deactivated station, when the station list is requested, then it is not in it.
 - Given the normalization rules, when unit-tested with every variant in BR-22 and §6.3, then each variant normalizes to the same form as its plain spelling.
 - Given the seed, when it is inspected, then every station of both required lines exists in Arabic and English, under its governorate.
 
@@ -401,10 +399,19 @@ As the platform
 I need trains, classes, coaches, timetables, dated trips and fares modelled once and correctly
 So that search can find a trip, inventory can create its seats, and booking can price it
 
-### User flow (see Figma)
+### Service flow
 Services: catalog (owner — trains, train types, classes, coach layouts, timetables, dated trips, fares, trip generation), inventory (from Sprint 3, consumer of "a trip was published" — nothing published this sprint may be lost before it exists).
 
-No screen of its own: this is the data behind every card. Read a Results card backwards:
+No client request of its own: this is the model behind every search result, and the job that
+turns timetables into dated trips.
+
+  a timetable is published (OPS-1 — the seed goes through the same path)
+    -> catalog, scheduled generation job: the dated trips of the booking window, each in one
+       transaction with its stops, its composition and "a trip was published" in the outbox
+    -> outbox -> RabbitMQ -> inventory (Sprint 3), which creates the trip's seats without
+       calling catalog back — until inventory exists, nothing published may be lost
+
+Read one search result backwards to see what the model must hold:
 
   "El Raml Station 12:30 PM 27 Oct 2025"  ...  "Ramsis Station 04:00 PM"
       -> a dated trip: one train on one date, its stops, an arrival and a departure at each
@@ -413,7 +420,7 @@ No screen of its own: this is the data behind every card. Read a Results card ba
   "4 Stops"                 -> the ordered stops between the two stations
   "Ticket Fees 155 EGP"     -> a fare for that train, that class and that pair of stations
 
-and the stops sheet:
+and a trip's stops:
 
   Ramsis Station, Cairo 07:30 PM -> Banha -> Tanta -> Damnhour -> Sidi Gaber
   -> ElRaml Station, Alex 11:00 PM
@@ -480,54 +487,47 @@ As a traveller
 I want every train between my two stations on my date, with times, seats and the price
 So that I can choose one in seconds instead of guessing
 
-### User flow (see Figma)
+### Service flow
 Services: catalog (owner — search, fares, the result and its cache keys), gateway (REST edge; request shape; a deadline on the catalog call; the requested language).
 
-Home, One way tab:
+  client -> gateway: one-way search — From, To, departure date, seat class and an optional
+            train number, in the requested language
+    gateway: checks the shape, then calls catalog with a deadline
+    -> catalog (gRPC): validates the stations, date, class and train number; reads the day's
+       trips for that pair and class (cache-aside, CAT-5); drops what is no longer on sale
+       now; merges availability; sorts by departure from the origin
+    <- the five days of the date strip, decided by the server, and one result per trip,
+       for example:
+         El Raml Station 12:30 PM 27 Oct 2025 -> Ramsis Station 04:00 PM 27 Oct 2025
+         train number and type · class · 170 seats available · 210 minutes · 4 stops
+         between · 15500 piastres (155 EGP), without the booking fee
+       or an empty list with the reason it is empty, in the requested language:
+         "Sorry, no trains available on the selected date"
+         (Arabic: "عفوا, لا يوجد مواعيد متاحة في التاريخ المختار")
+       or a refusal naming the field to change
 
-  "Hello Ahmed Hussein"
-  From "Select Departure Station"   ⇅   To "Select Arrival Station"
-  Departure Date   (calendar)
-  Seat Class
-  "Train Number (Optional)"   "Enter Train Number"
-  Search
-
--> Results:
-
-  header "Alex → Cairo"   "Wed, 24 Oct . 1st Class"   edit icon (back to the form, filled in)
-  a 5-day date strip: Mon 22 · Tue 23 · Wed 24 · Thu 25 · Fri 26 (the selected day highlighted)
-  one card per trip:
-    "El Raml Station"  12:30 PM  27 Oct 2025        "Ramsis Station"  04:00 PM  27 Oct 2025
-    "Available Seats: 170"   "Duration 3hr 30mins"   "4 Stops"   "Ticket Fees 155 EGP"
-
--> or Results (No result):
-
-  "Sorry, no trains available on the selected date"
-  "Select Another Date"
-  (Arabic: "عفوا, لا يوجد مواعيد متاحة في التاريخ المختار" · "اختار تاريخ اخر")
-
-Tapping another day in the strip is another search. "4 Stops" opens the stops timeline
-(CAT-4). Tapping a card starts the booking (Sprint 3).
+Another day of the date strip is another search. A trip's stops are CAT-4. Choosing a trip
+starts the booking (Sprint 3).
 
 The design's sample data disagree with each other — the header says Wed 24 Oct, the card
-says 27 Oct 2025. Your responses must not: a card's departure date is the searched date.
+says 27 Oct 2025. Your responses must not: a result's departure date is the searched date.
 
 ### Rules and validations
 - Signed in (BR-01): Search requires a verified traveller — this design has no guest mode. The results themselves are the same for everyone, which is what makes them cacheable.
 - Any two stops, in travel order (BR-15): A trip matches when it stops at From and later at To. Banha → Tanta is a valid search on a Cairo → Alexandria train; Tanta → Banha on the same train is not. From equal to To is refused, naming To.
 - A Cairo date, at the passenger's origin (BR-16): A trip appears under the date it departs the passenger's origin station in Cairo time — not the date the train left its first station.
-- Only what can be sold (BR-16): Not departed, not cancelled, sales open, and within the 30-day booking window. Sales close 15 minutes before departure from the passenger's origin station — exactly 15 minutes before is closed — and a closed trip is not listed. Decision: the window is today plus the next 29 days (30 Cairo calendar days), one definition used by search, the date strip, the calendar's selectable range and trip generation.
-- Sold out is shown (BR-16): A trip with zero seats in the chosen class on that segment is returned and marked sold out, not hidden. A train that has no coach of the chosen class is not a result at all.
-- Seat Class is required: The header always names one class, and every card's seats and fare are for it. Decision: Seat Class is required and its absence is a field error. The class list the app offers comes from catalog, in plain words (CAT-2).
+- Only what can be sold (BR-16): Not departed, not cancelled, sales open, and within the 30-day booking window. Sales close 15 minutes before departure from the passenger's origin station — exactly 15 minutes before is closed — and a closed trip is not listed. Decision: the window is today plus the next 29 days (30 Cairo calendar days), one definition used by search, the date strip, the bookable range a refused date states and trip generation.
+- Sold out is returned (BR-16): A trip with zero seats in the chosen class on that segment is returned and marked sold out, not hidden. A train that has no coach of the chosen class is not a result at all.
+- Seat Class is required: Every search is for exactly one class, and every result's seats and fare are for it. Decision: Seat Class is required and its absence is a field error. The class list a client offers comes from catalog, in plain words (CAT-2).
 - Train number (BR-18): Optional; narrows the search to that train. Arabic digits are accepted. An unknown train number is a field error on Train Number; a known train that does not run between the two stations in that direction is an empty result with that reason.
-- Every card carries (BR-17): Train number, train type, class, departure station, time and date, arrival station, time and date, duration, the number of stops between the two stations (excluding both), available seats for that class on that segment, and the fare without the booking fee (BR-19) in integer piastres with its currency.
-- Times the app cannot get wrong: Times are Cairo local times with their offset, so a phone set to another time zone still shows 12:30 PM. The duration is a number of minutes computed from instants, so it is right across midnight and across a daylight saving change.
+- Every result carries (BR-17): Train number, train type, class, departure station, time and date, arrival station, time and date, duration, the number of stops between the two stations (excluding both), available seats for that class on that segment, and the fare without the booking fee (BR-19) in integer piastres with its currency.
+- Times a client cannot get wrong: Times are returned as Cairo local times with their offset, so a client whose device is set to another time zone still reads 12:30 PM, never a converted time. The duration is a number of minutes computed from instants, so it is right across midnight and across a daylight saving change.
 - Date strip: Five days around the selected date, never including a day before today or past the window — near either edge the selected day moves off-centre. The server says which days they are, so the window rule lives in one place.
 - Availability, honestly provisional: Until inventory exists (Sprint 3, SEAT-4), the count is the class capacity of the trip. The response's shape, the availability source (behind one seam) and its cache keys are designed now for the real per-segment count (BR-24) — Sprint 3 changes where the number comes from, not the response and not the keys.
-- Errors say what to change (BR-57, research: "I don't know what to change: station, date, or round-trip option"): Each refusal names the field and the fix — From or To unknown or inactive, the same station twice, a date in the past, a date past the window (with the last bookable date), an unknown class, an unknown train number. Empty results say why too: "No train runs between these stations in this direction" (change the stations) is different from "Sorry, no trains available on the selected date" (change the date — "Select Another Date") and from "this train does not serve this route" (change or clear the train number).
+- Errors say what to change (BR-57, research: "I don't know what to change: station, date, or round-trip option"): Each refusal names the field and the fix — From or To unknown or inactive, the same station twice, a date in the past, a date past the window (with the last bookable date), an unknown class, an unknown train number. Empty results say why too: "No train runs between these stations in this direction" (change the stations) is different from "Sorry, no trains available on the selected date" (change the date) and from "this train does not serve this route" (change or clear the train number).
 - Bounded, complete, ordered: One day between two stations is tens of trips; it is returned complete, sorted by departure time from the origin (the default, BR-18), and CAT-4's filters and other sorts apply to the whole day, not a page. The number of database round trips does not grow with the number of results.
 - Cached, but never frozen in time (CAT-5): Results are served cache-aside, and the time-dependent part of BR-16 — not departed, sales open — is applied on every read. A list cached at 13:50 must not offer, at 14:00, a trip whose sales closed at 13:55.
-- When a service is down: The gateway's call to catalog has a deadline; if catalog is slow or stopped, the traveller receives a *search unavailable, try again* code within it, never a hang. Identity being down does not stop search — tokens are verified at the gateway.
+- When a service is down: The gateway's call to catalog has a deadline; if catalog is slow or stopped, the client receives a *search unavailable, try again* code within it, never a hang. Identity being down does not stop search — tokens are verified at the gateway.
 
 ### Domain events to publish
 - None. Search is a read. Resist publishing "a search was performed" through the outbox for analytics — it would turn the most frequent read in the system into a write. (Recording the search for "Recent Search" is CAT-4 and stays inside catalog.)
@@ -538,7 +538,7 @@ says 27 Oct 2025. Your responses must not: a card's departure date is the search
 - Tanta → Cairo with the number of a Cairo → Alexandria train (§6.3).
 - The selected date is the last day of the window, and the strip wants two days after it.
 - A trip departing at 00:30 on a daylight saving night.
-- A traveller whose phone is set to Dubai time.
+- A client whose device is set to Dubai time.
 - Catalog is stopped while a traveller searches.
 - A route served only by a Friday train, searched on a Wednesday.
 
@@ -562,58 +562,63 @@ says 27 Oct 2025. Your responses must not: a card's departure date is the search
 
 ---
 
-## CAT-4 — Round trip, filters, sorting, the stops timeline and recent searches
+## CAT-4 — Round trip, filters, sorting, a trip's stops and recent searches
 
 **5 points · Priority High · `catalog,gateway,search,round-trip,sprint-2`**
 
 ### User story
 As a traveller planning a return journey, or one who knows exactly when and how much
-I want a round trip in one flow, filters for time, price and train type, the stops of each trip, and my recent searches on Home
+I want a round trip in one flow, filters for time, price and train type, the stops of each trip, and my recent searches ready to repeat
 So that I find the right train without starting over (research: "No way to narrow results")
 
-### User flow (see Figma)
-Services: catalog (owner — round-trip search, filters, sorting, stops timeline, recent searches), gateway (REST edge; passes the signed-in traveller so recent searches are theirs).
+### Service flow
+Services: catalog (owner — round-trip search, filters, sorting, a trip's stops, recent searches), gateway (REST edge; passes the signed-in traveller so recent searches are theirs).
 
-Home -> "Round trip" tab: the same form plus "Return Date".
+Round trip — two lists, the second computed from the choice made on the first:
 
-  Search -> outbound Results (header: outbound route and date) -> pick a trip
-         -> return Results: the reverse route on the Return Date, only trips that leave
-            after the chosen outbound trip arrives
-         -> pick a trip -> Choose Passengers (Sprint 3: one booking, two legs, one payment — D7)
+  client -> gateway -> catalog (gRPC): outbound search — CAT-3's search plus a return date
+    <- the outbound list (CAT-3), with that day's filter options
+  client -> gateway -> catalog (gRPC): the return list for the chosen outbound trip, on
+            the return date
+    catalog: reads that trip's arrival itself; searches the reverse route on the return date
+    <- only trips that leave after the chosen outbound trip arrives, or an empty list with
+       its reason
+  the two chosen trips go to the hold (Sprint 3: one booking, two legs, one payment — D7)
 
-On any Results list: filters (departure time window, maximum fare, train type) and sorting
+Any list takes filters (departure time window, maximum fare, train type) and a sort
 (departure time, duration, fare). The design has no filter screen — the research asked for
 it ("Users wanted to filter by time and price") and BR-18 defines it.
 
-Tap "4 Stops" on a card -> the stops sheet:
+A trip's stops — what the design's "4 Stops" opens:
 
-  Ramsis Station, Cairo     07:30 PM
-  Banha
-  Tanta
-  Damnhour
-  Sidi Gaber
-  ElRaml Station, Alex      11:00 PM
-  Back
+  client -> gateway -> catalog (gRPC): the stops of a trip between the passenger's stations
+    catalog: trip stops, cache-aside
+    <- in travel order, each with its Cairo time, and its date where it changes:
+         Ramsis Station, Cairo 07:30 PM -> Banha -> Tanta -> Damanhour -> Sidi Gaber
+         -> El Raml Station, Alexandria 11:00 PM
 
-Home also shows "Recent Search" (wireframe): the traveller's last searches; tapping one fills
-the form.
+Recent searches — the design's "Recent Search" wireframe:
+
+  every valid search -> catalog records it for the signed-in traveller
+  client -> gateway -> catalog (gRPC): the signed-in traveller's recent searches
+    <- the last five, newest first, each with what a client needs to run it again
 
 ### Rules and validations
 - Return date (BR-20): On or after the departure date and within the booking window; otherwise refused, naming Return Date.
-- The exact reverse: The return search goes from the outbound To to the outbound From, in the same class (Home has one Seat Class for both legs). Decision: a train number narrows the outbound leg only — a return train has its own number.
-- After arrival, decided by the server (BR-20): The return list is computed for a chosen outbound trip and contains only trips that depart the return origin after that outbound trip arrives there. The server reads the outbound arrival itself — it never trusts a time sent by the app. Decision: strictly after, with no minimum connection time.
+- The exact reverse: The return search goes from the outbound To to the outbound From, in the same class (a round-trip search has one seat class for both legs). Decision: a train number narrows the outbound leg only — a return train has its own number.
+- After arrival, decided by the server (BR-20): The return list is computed for a chosen outbound trip and contains only trips that depart the return origin after that outbound trip arrives there. The server reads the outbound arrival itself — it never trusts a time sent by the client. Decision: strictly after, with no minimum connection time.
 - Empty lists explain themselves (BR-57): "No return trains on that date" differs from "nothing leaves after your outbound trip arrives" — the second tells the traveller to change the return date or the outbound trip (the research's "...or round-trip option"). A list emptied by filters carries its own reason too: change the filters, not the date.
 - Filters (BR-18): A departure time window (Cairo local time at the passenger's origin, within the selected day, start before end), a maximum fare (integer piastres, compared with the fare **without** the booking fee), and one or more train types. Invalid values are field errors. On a round trip, filters apply to each list separately.
-- Filter options come from the results: The response tells the app which train types appear in that day's results and the fare range, so the app never offers a filter that can only return nothing.
+- Filter options come from the results: The response tells the client which train types appear in that day's results and the fare range, so a client never offers a filter that can only return nothing.
 - Sorting (BR-18): Departure time (default), duration, fare — with a documented tie-break, so the same request always returns the same order.
 - Filters do not multiply the cache (CAT-5): Filtering and sorting are applied to the day's cached results on read, so a new filter combination is never a new database query.
-- Stops timeline: The passenger's segment — boarding stop, every stop between, alighting stop — each with its Cairo local time, and its date wherever it differs from the boarding date. The number of stops between always equals the card's "N Stops". Names come from the catalog: "Damanhour", not the design's "Damnhour".
+- A trip's stops: The passenger's segment — boarding stop, every stop between, alighting stop — each with its Cairo local time, and its date wherever it differs from the boarding date. The number of stops between always equals the search result's "N Stops" count. Names come from the catalog: "Damanhour", not the design's "Damnhour".
 - Trip stops are cached (§2.3): Owned by catalog, long jittered TTL, invalidated when that trip's stops or times change.
 - Recent searches (BR-21): The last 5 per traveller, newest first, without duplicates. Decision: two searches are the same when route, class, one way or round trip, and train number are the same; repeating one moves it to the top with its new dates.
 - What gets recorded: A valid search is recorded whether or not it found trains (it is the search the traveller may want to repeat); an invalid request is not. Recording never slows a search down and never makes it fail.
-- Stale entries: A recent search whose departure date has passed is returned without its dates, so the app asks for new ones. An entry whose station has been deactivated is dropped. Station names are returned in the requested language.
+- Stale entries: A recent search whose departure date has passed is returned without its dates, so the client asks for new ones. An entry whose station has been deactivated is dropped. Station names are returned in the requested language.
 - Per traveller, never shared (§2.3 rule 6): Recent searches are never cached under a shared key, never mixed into the shared search cache, and never visible to another account.
-- Five, even under concurrency: Two searches at the same instant from the same traveller's two phones leave at most 5 entries and no duplicate — the guarantee lives in the data store, not in a read-then-write.
+- Five, even under concurrency: Two searches at the same instant from two clients of the same traveller leave at most 5 entries and no duplicate — the guarantee lives in the data store, not in a read-then-write.
 
 ### Domain events to publish
 - None. Recent searches are catalog's own data in catalog's own database; publishing them would put a traveller's travel pattern on the broker with no consumer that needs it.
@@ -625,7 +630,7 @@ the form.
 - A maximum fare below every fare of the day.
 - The same search repeated six times, then six different ones.
 - Two travellers search the same route in the same second — each sees only their own recent searches.
-- A trip's stops are viewed while its timetable is republished.
+- A trip's stops are read while its timetable is republished.
 - The chosen outbound trip sells out or is withdrawn between the two lists.
 
 ### Acceptance criteria
@@ -639,8 +644,8 @@ the form.
 - Given a train type filter, when applied, then only trips of that type remain; given an unknown type, then it is a field error.
 - Given sorting by duration and then by fare, when each is requested twice, then the order follows the sort with the documented tie-break and is identical both times.
 - Given filters that remove every trip, when applied, then the empty reason is "no trains match your filters", not "no trains on the selected date".
-- Given a card showing "4 Stops", when its timeline is requested, then six entries are returned in order — boarding, four between, alighting — with times, and dates where they change.
-- Given a traveller who searched seven different routes, when Home reads recent searches, then the last five are returned newest first; given one of them is searched again, then it moves to the top and appears once.
+- Given a search result with 4 stops between, when that trip's stops are requested, then six entries are returned in order — boarding, four between, alighting — with times, and dates where they change.
+- Given a traveller who searched seven different routes, when their recent searches are read, then the last five are returned newest first; given one of them is searched again, then it moves to the top and appears once.
 - Given traveller A's recent searches, when traveller B reads theirs, then none of A's appear — and no recent-search value is stored under a key that does not identify its account.
 - Given two searches by the same traveller at the same instant, when both complete, then at most five entries exist and none is duplicated — proven by a concurrent test.
 - Given a recent search whose departure date has passed, when it is read, then it is returned without its dates.
@@ -657,14 +662,20 @@ As the owner of the catalog service
 I need the most-read data in the system served from Redis without ever trusting Redis with a decision
 So that search stays fast under load, correct after a change, and alive when Redis is not
 
-### User flow (see Figma)
-Services: catalog (owner — every key in this story: what it holds, its TTL, what removes it), gateway (aggregates health; shows catalog as degraded, not down, when Redis is gone).
+### Service flow
+Services: catalog (owner — every key in this story: what it holds, its TTL, what removes it), gateway (aggregates health; reports catalog as degraded, not down, when Redis is gone).
 
-No screen. The developer's flow — and the demo you will be asked to run:
+No client request of its own: the cache sits inside catalog, behind CAT-1, CAT-3 and CAT-4.
+
+  read:        catalog -> Redis; on a miss, one rebuild from Postgres -> written back to Redis
+  invalidate:  a timetable published, a fare changed, a station changed -> catalog's inbox
+               -> exactly the affected entries become unreachable
+
+The developer's flow — and the demo you will be asked to run:
 
   1. Search Cairo → Alexandria for tomorrow, First Class AC: cold, built from Postgres, written to Redis.
   2. Search it again: warm, no database query at all.
-  3. Change that fare through OPS-1: the next search shows the new fare, without waiting for a TTL.
+  3. Change that fare through OPS-1: the next search returns the new fare, without waiting for a TTL.
   4. Fire 200 identical searches at a cold key at once: the database rebuilds it once.
   5. Stop Redis: searches still answer, slower; the health check says degraded; the logs say why.
   6. Start Redis again: the cache is used again, with no restart.
@@ -703,7 +714,7 @@ No screen. The developer's flow — and the demo you will be asked to run:
 
 - Given a cold search, when it runs, then its result is written to Redis; when it is repeated, then no database query runs and a hit is counted.
 - Given 200 simultaneous searches on a cold key spread across two catalog instances, when they complete, then the database was queried once to rebuild it and all 200 received the same correct answer — proven by a concurrent test that counts queries.
-- Given a cached search, when that route's fare changes through OPS-1, then the next search shows the new fare without waiting for the TTL, and searches on unrelated routes are still served from the cache.
+- Given a cached search, when that route's fare changes through OPS-1, then the next search returns the new fare without waiting for the TTL, and searches on unrelated routes are still served from the cache.
 - Given a rebuild that read the old fare before a change and writes after the invalidation, when the key is read next, then the old fare is not returned — proven by a test that forces that interleaving.
 - Given the same invalidation event delivered twice, when both are processed, then the outcome equals processing it once.
 - Given 1,000 keys written in the same second, when their TTLs are inspected, then they are spread across the documented band.
@@ -726,20 +737,23 @@ As an ENR operator
 I want to publish a timetable and change a fare through an API
 So that the network travellers search is the one ENR runs — and every change can be traced to a person
 
-### User flow (see Figma)
+### Service flow
 Services: catalog (owner — the operations API, timetable versions, fares, trip generation, the audit trail), identity (the seeded operator account and its role), gateway (REST edge; operator-only access), inventory (from Sprint 3, consumer of trips published and withdrawn).
 
 No UI in this project (requirements, §3 and Appendix C). The operator works through the API
-with a tool such as curl or Postman:
+with a tool such as curl or Postman; every call below passes the gateway's operator-only rule
+before it reaches catalog:
 
-  sign in as the seeded operator
+  sign in as the seeded operator (identity)
   -> publish a timetable for train 916: running days, ordered stops with times,
      composition, fares, effective from a date
+     -> catalog validates it whole, then in one transaction: the version, its audit entry
+        and its events in the outbox
      -> the dated trips for the booking window are generated, each one published for inventory
      -> the search cache for the affected routes is invalidated
      -> the response says how many trips were created, changed and withdrawn
   -> change the First Class AC fare Cairo → Alexandria on train 916, from now on
-     -> new searches show the new fare; holds already made keep theirs (Sprint 3, BR-30)
+     -> new searches return the new fare; holds already made keep theirs (Sprint 3, BR-30)
   -> read the audit trail: who did what, when, and how many tickets it touched
 
 Delaying and cancelling a trip are the other operations; they come in Sprint 5 (OPS-2).
@@ -779,7 +793,7 @@ Delaying and cancelling a trip are the other operations; they come in Sprint 5 (
 - Given a published trip with sold seats (supplied through the seam), when a republish changes its times or removes a stop a ticket uses, then it is refused listing the affected trips, and nothing was applied.
 - Given the sold-seats answer cannot be obtained, when a republish that touches published trips is sent, then it is refused — never treated as zero tickets.
 - Given the same publish sent twice, when both complete, then one version, no duplicate trips, no duplicate events and one audit entry exist.
-- Given a fare change effective now, when a traveller searches next, then the new fare is shown, and the fare history shows the previous fare with the period it applied.
+- Given a fare change effective now, when a traveller searches next, then the new fare is returned, and the fare history shows the previous fare with the period it applied.
 - Given a fare change dated in the past, when it is sent, then it is refused naming the effective date.
 - Given any operations action, when the audit trail is read, then it shows who, when, what (before and after), the number of affected tickets and the correlation ID.
 - Given a fare change whose transaction fails, when the system is inspected, then neither the new fare, nor its audit entry, nor its event exists.
@@ -793,5 +807,5 @@ Delaying and cancelling a trip are the other operations; they come in Sprint 5 (
 - **The profile check at the hold.** AUTH-5 builds and tests the "bookable traveller" rule; the hold that uses it is Sprint 3 (SEAT-3, BOOK-1).
 - **Delaying and cancelling a trip.** OPS-1 publishes timetables and changes fares; delays and cancellations, and the fan-out they cause, are Sprint 5 (OPS-2).
 - **A visual seat map and train-type information** — the research's "What's next", never designed (Appendix A).
-- **The profile edit screen, discounted passenger types, non-Egyptian travellers** — not designed (Appendix A); the model must allow them later without a migration (BR-13).
+- **A separate profile edit, discounted passenger types, non-Egyptian travellers** — not designed (Appendix A); the profile changes through the self passenger (AUTH-6), and the model must allow the rest later without a migration (BR-13).
 - **An operator app.** The operations API has no UI in this project.

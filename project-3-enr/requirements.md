@@ -16,8 +16,8 @@ You have **four sources of truth**, and you are expected to cross-read all of th
 | Source | What it gives you |
 |---|---|
 | **This document** | The business: who the users are, what the product must do, the rules it must never break, the edge cases that will bite you, and the architecture you are required to use |
-| **The user stories** (`sprint-1-…` to `sprint-5-…`) | The user flow, screen by screen, with rules and acceptance criteria per story |
-| **The Figma design** | The exact screens, states and copy. The **Final UI** page is the product. The **Presentation** page is the UX research behind it — read it, it explains *why* the screens look the way they do |
+| **The user stories** (`sprint-1-…` to `sprint-5-…`) | The backend work, story by story: the service flow (what a client sends, which services act, what the response or event carries), with rules and acceptance criteria per story |
+| **The Figma design** | Context, not a deliverable: no client UI is built in this project. The screens, states and copy show what your API must make possible. The **Presentation** page is the UX research behind it — read it, it explains *why* the product behaves the way it does |
 | **[`microservices-nestjs-guide.md`](../microservices-nestjs-guide.md)** | *How* to build microservices with NestJS, and the `MS-###` rules your code is reviewed against |
 
 **What this document deliberately does NOT give you:** database tables, endpoints, `.proto` files, queue names or an event catalogue. **Those are your deliverables.** You are now designing a *system of services*, which means one more question on top of "what fields does a ticket have?" — **"which service owns a ticket, and who else needs to know about it?"**
