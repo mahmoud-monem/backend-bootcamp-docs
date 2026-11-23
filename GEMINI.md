@@ -23,7 +23,8 @@ The repository serves two primary functions:
 │   │   ├── clean-code.md              # CC-###: Architecture, functions, error handling, layering
 │   │   ├── typescript.md              # TS-###: Strictness, type modeling, boundary hygiene
 │   │   ├── testing-jest.md            # JT-###: Mocking policy, isolation, test design
-│   │   └── restful-api.md             # RS-###: Resource modeling, HTTP semantics, auth, envelopes
+│   │   ├── restful-api.md             # RS-###: Resource modeling, HTTP semantics, auth, envelopes
+│   │   └── modular-structure.md       # MA-###: Vertical slicing, encapsulation, module graph, data ownership
 │   ├── project-1-online-exam/         # Project 1: Express + TS + MongoDB + Jest
 │   │   └── requirements.md            # Requirements, business rules, scoring & timer contracts
 │   ├── project-2-docura/              # Project 2: NestJS + TS + PostgreSQL + Event-Driven
@@ -90,6 +91,7 @@ As a mentor or review agent auditing student teams, execute the following protoc
   - `typescript.md` (`TS-###`)
   - `testing-jest.md` (`JT-###`)
   - `restful-api.md` (`RS-###`)
+  - `modular-structure.md` (`MA-###`)
 - **Strict Verification Protocol:**
   - Search heuristics (regex/grep) generate candidates, not verdicts.
   - Always read the surrounding code context to verify the violation.
@@ -141,7 +143,7 @@ Reviewers must differentiate between the architectural patterns of different boo
 ## 5. Review Standards Catalog Extension Rules
 
 When adding new rules or tweaking existing catalogs in `docs/standards/`:
-1. **Permanent IDs:** Rule IDs (`CC-###`, `TS-###`, `JT-###`, `RS-###`) must never be reused or renumbered.
+1. **Permanent IDs:** Rule IDs (`CC-###`, `TS-###`, `JT-###`, `RS-###`, `MA-###`) must never be reused or renumbered.
 2. **Seven Mandatory Fields:** Every rule must provide:
    - `Severity:` (`critical` | `major` | `minor`)
    - `Applies to:` (glob pattern or file scope)

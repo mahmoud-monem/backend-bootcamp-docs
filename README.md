@@ -41,7 +41,7 @@ Four sprints of user stories, each with a `.csv` of the same stories ready to im
 
 ## Shared across projects
 
-- [`standards/`](./standards/) — the rule catalogs code is reviewed against (clean code, TypeScript, Jest, RESTful API)
+- [`standards/`](./standards/) — the rule catalogs code is reviewed against (clean code, TypeScript, Jest, RESTful API, modular structure)
 - [`microservices-nestjs-guide.md`](./microservices-nestjs-guide.md) — microservices with NestJS handbook: boundaries, gateway, gRPC, RabbitMQ, outbox, sagas, caching, observability, resilience, testing
 - [`design-patterns-session.md`](./design-patterns-session.md) — design patterns session material
 - [`git-github-guide.md`](./git-github-guide.md) — git, GitHub and version control handbook: commits, branching, pull requests, code review, releases

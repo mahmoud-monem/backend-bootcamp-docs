@@ -1,7 +1,11 @@
 # Jest & Unit Testing Rule Catalog (`JT-###`)
 
 Applies to `**/*.spec.ts`, `**/*.test.ts`, `tests/**`, `__tests__/**`, `jest.config.*`,
-and test setup files.
+`vitest.config.*`, and test setup files.
+
+> **Vitest & Testcontainers parity:** When a project uses Vitest (`vi.fn`, `vi.mock`,
+> `vi.useFakeTimers`) instead of Jest, or Testcontainers for Postgres/Redis/RabbitMQ
+> integration tests, every `JT-###` rule applies identically with the equivalent runner API.
 
 Read [`README.md`](./README.md) for severity meanings, the verify-before-report protocol,
 and the false-positive rules.
@@ -54,6 +58,15 @@ and the false-positive rules.
 **Severity:** major · **Applies to:** `jest.config.*`
 **Detect:** `testMatch: ['**/*.test.ts']` while the repo contains `*.spec.ts`, or vice
 versa. Confirm by listing both patterns on disk.
+
+```ts
+// Bad — spec files exist as *.spec.ts, but config only discovers *.test.ts
+export default { testMatch: ["**/*.test.ts"], passWithNoTests: true };
+
+// Good — pattern matches the project's actual test filenames
+export default { testMatch: ["**/*.spec.ts", "**/*.test.ts"] };
+```
+
 **Why:** Half the suite silently does not run, and `passWithNoTests` makes CI green anyway.
 **Not a violation when:** Both patterns are covered.
 
@@ -110,8 +123,11 @@ documented with a link.
 `beforeEach(() => jest.clearAllMocks())` in the suites.
 
 ```ts
+// Bad — jest.config.ts omits reset flags and suites share mock call counts
+export default { preset: "ts-jest", testEnvironment: "node" };
+
 // Good — jest.config.ts
-{ clearMocks: true, restoreMocks: true }
+export default { clearMocks: true, restoreMocks: true };
 ```
 
 **Why:** Without a reset, call counts and queued `mockResolvedValueOnce` values leak into
@@ -124,6 +140,17 @@ the next test, making results depend on file order.
 **Severity:** major · **Applies to:** `jest.config.*`, `setup*.ts`, test scripts
 **Detect:** Tests running with `NODE_ENV=development`; a setup file connecting to the same
 `MONGO_URI` as the dev database; `.env` loaded without a `.env.test` override.
+
+```ts
+// Bad — integration setup reads .env and connects to the shared dev database
+dotenv.config();
+await dataSource.initialize(); // points at dev Postgres!
+
+// Good — isolated test env or disposable Testcontainers instance
+dotenv.config({ path: ".env.test", override: true });
+// or start PostgreSqlContainer / MongoMemoryServer in test setup
+```
+
 **Why:** A test suite that can write to a real database will eventually delete a real
 collection.
 **Not a violation when:** The test config demonstrably points at a disposable or in-memory
@@ -137,6 +164,18 @@ instance.
 **Severity:** minor · **Applies to:** test files
 **Detect:** A spec far from its subject with no convention; a `tests/` folder in one module
 and colocated specs in another within the same project.
+
+```text
+// Bad
+src/modules/booking/booking.service.ts
+tests/random/misc-tests/service-check.ts
+
+// Good — colocated unit specs + explicit top-level test/ for e2e/integration
+src/modules/booking/booking.service.ts
+src/modules/booking/booking.service.spec.ts
+test/booking.e2e-spec.ts
+```
+
 **Why:** Colocation is how a reader knows a module has tests without searching.
 **Not a violation when:** The project consistently uses a top-level `tests/` tree.
 
@@ -146,6 +185,16 @@ and colocated specs in another within the same project.
 **Severity:** minor · **Applies to:** test files
 **Detect:** A single `auth.test.ts` importing and asserting on the controller, the service,
 the repository, and the middleware.
+
+```text
+// Bad — one mega-file testing 4 distinct units with mixed mocks
+src/modules/auth/auth.spec.ts
+
+// Good — one unit spec per module under test
+src/modules/auth/auth.service.spec.ts
+src/modules/auth/token.service.spec.ts
+```
+
 **Why:** One spec, one subject. Mixed specs cannot say what broke when they go red.
 **Not a violation when:** It is explicitly an integration or end-to-end spec named as such.
 
@@ -310,6 +359,18 @@ can never fail, sitting in a green coverage report.
 **Detect:** `jest.mock` usage with no `clearMocks`/`resetMocks` in config and no
 `beforeEach(() => jest.clearAllMocks())`; `mockResolvedValueOnce` queues left over from a
 previous test.
+
+```ts
+// Bad — call count from test 1 leaks into test 2 when clearMocks is off
+it("first test", async () => { await service.notify(u1); });
+it("second test", async () => { expect(mailer.send).toHaveBeenCalledTimes(1); }); // fails with 2!
+
+// Good
+beforeEach(() => {
+  jest.clearAllMocks();
+});
+```
+
 **Why:** Leftover call history makes `toHaveBeenCalledTimes` assertions pass or fail based
 on which test ran first.
 **Not a violation when:** Config-level reset is enabled (see `JT-005`).
@@ -363,6 +424,17 @@ collaborator breaks the test at compile time instead of at runtime.
 **Severity:** major · **Applies to:** test files
 **Detect:** `jest.mock("./x")` with no factory and no `mockResolvedValue` for a method the
 code path calls — the call returns `undefined` and the test asserts on downstream noise.
+
+```ts
+// Bad — findById returns undefined by default, testing the "missing" branch accidentally
+jest.mock("./quiz.repository");
+await expect(quizService.publish("q1")).rejects.toThrow();
+
+// Good — configure every collaborator return explicitly per test
+quizRepository.findById.mockResolvedValue(makeQuiz({ id: "q1", isPublished: false }));
+await quizService.publish("q1");
+```
+
 **Why:** The test then verifies the behaviour of `undefined`, not of the system.
 **Not a violation when:** The undefined return is exactly what the real collaborator gives
 and the test says so.
@@ -373,6 +445,17 @@ and the test says so.
 **Severity:** minor · **Applies to:** test files
 **Detect:** Deep mocks of third-party clients (`mongoose.Model` chains, `nodemailer`
 transports) with hand-written chainable stubs (`{ populate: () => ({ lean: () => data }) }`).
+
+```ts
+// Bad — hand-built Mongoose chain stub breaks whenever query chaining changes
+jest.spyOn(QuizModel, "findById").mockReturnValue({
+  populate: () => ({ lean: () => Promise.resolve(quizDoc) }),
+} as unknown as ReturnType<typeof QuizModel.findById>);
+
+// Good — mock your own thin repository port; test the real Mongoose query in integration tests
+quizRepository.findByIdWithQuestions.mockResolvedValue(makeQuiz());
+```
+
 **Why:** Hand-built chain stubs encode your guess of the library's API; when the guess is
 wrong, the test passes and production does not.
 **Not a violation when:** The third-party call sits behind your own repository interface
@@ -413,6 +496,24 @@ of one returned object).
 ### JT-302 — No Arrange / Act / Assert shape
 **Severity:** minor · **Applies to:** test files
 **Detect:** Setup, invocation, and assertions interleaved; several `act` calls in one test.
+
+```ts
+// Bad — multiple acts and assertions interleaved in one block
+it("manages hold lifecycle", async () => {
+  const hold = await service.holdSlot(dto);
+  expect(hold.status).toBe("ACTIVE");
+  await service.cancelHold(hold.id);
+  expect(repo.markCancelled).toHaveBeenCalled();
+});
+
+// Good — Arrange, single Act, Assert
+it("marks an active hold as cancelled", async () => {
+  holdRepo.findById.mockResolvedValue(makeHold({ id: "h1", status: "ACTIVE" }));
+  await service.cancelHold("h1");
+  expect(holdRepo.markCancelled).toHaveBeenCalledWith("h1");
+});
+```
+
 **Why:** One act per test is what makes the failure attributable.
 **Not a violation when:** The extra call is setup for the behaviour under test
 (create-then-read).
@@ -471,6 +572,21 @@ await expect(authService.signUp(dto)).rejects.toThrow(AppError);
 **Severity:** major · **Applies to:** test files
 **Detect:** A service with documented failure modes (not found, already exists, expired
 OTP, unauthorized, invalid state transition) whose spec asserts only success.
+
+```ts
+// Bad — only tests valid cancellation; ignores the 24h cutoff and already-cancelled errors
+describe("BookingService.cancel", () => {
+  it("cancels a confirmed booking", async () => { ... });
+});
+
+// Good — tests both happy path and every documented failure transition
+describe("BookingService.cancel", () => {
+  it("refunds 100% when cancelled 24+ hours before start", async () => { ... });
+  it("throws ConflictException when booking is already cancelled", async () => { ... });
+  it("throws ForbiddenException when another patient tries to cancel", async () => { ... });
+});
+```
+
 **Why:** The error branches are where the security and correctness bugs live; the happy
 path is the one manual testing already covers.
 **Not a violation when:** The unit genuinely has one path.
@@ -532,6 +648,18 @@ rate limiting).
 **Severity:** minor · **Applies to:** test files
 **Detect:** `toMatchSnapshot()` on API responses, service results, or objects containing
 ids and timestamps.
+
+```ts
+// Bad — dynamic timestamps/UUIDs force constant `jest -u` snapshot regeneration
+expect(response.body).toMatchSnapshot();
+
+// Good — assert stable contract fields explicitly
+expect(response.body).toMatchObject({
+  success: true,
+  data: { status: "CONFIRMED", feePiastres: 50000 },
+});
+```
+
 **Why:** Snapshots of dynamic data are re-recorded on every failure, so the "test" becomes
 a record of whatever the code currently does.
 **Not a violation when:** Asserting on large, stable, human-reviewed output (a rendered
@@ -542,6 +670,16 @@ template) with inline snapshots.
 ### JT-309 — Test named for a bug ticket rather than a rule
 **Severity:** minor · **Applies to:** test files
 **Detect:** `it("fixes #412")`, `it("regression test")`.
+
+```ts
+// Bad
+it("fixes #412", async () => { ... });
+
+// Good
+// Regression for #412: Cairo midnight boundary must use Africa/Cairo, not UTC
+it("applies 24h free-cancellation cutoff at exact 24h00m00s in Africa/Cairo", async () => { ... });
+```
+
 **Why:** A regression test states the rule that must hold forever; the ticket number goes
 in a comment.
 **Not a violation when:** The name states the behaviour and merely cites the ticket.
@@ -640,6 +778,17 @@ crash.
 **Severity:** minor · **Applies to:** test files
 **Detect:** `toBe` on objects/arrays (reference equality), `toEqual` where
 `toStrictEqual` is meant, `toContain` on an object array where `toContainEqual` is needed.
+
+```ts
+// Bad — `toBe` checks object identity; `toEqual` ignores missing vs undefined properties
+expect(result).toBe({ id: "1", score: 80 });
+expect(items).toContain({ id: "1" });
+
+// Good
+expect(result).toStrictEqual({ id: "1", score: 80 });
+expect(items).toContainEqual({ id: "1" });
+```
+
 **Why:** `toBe` on an object passes only by accident of reference sharing; `toEqual`
 ignores `undefined` fields, hiding a whole class of mapper bugs.
 **Not a violation when:** Reference identity is the point.
@@ -662,6 +811,29 @@ expect(user).toMatchObject({ email: "user@example.com", role: Role.Student });
 **Why:** Over-specified assertions break on unrelated changes and train the team to update
 tests without reading them.
 **Not a violation when:** The full shape *is* the contract (an API response body).
+
+---
+
+### JT-406 — Boilerplate-only smoke test masquerading as coverage
+**Severity:** major · **Applies to:** test files
+**Detect:** Auto-generated NestJS CLI specs (`nest g`) containing only `expect(service).toBeDefined()` or `expect(controller).toBeDefined()` with zero behavioural tests.
+
+```ts
+// Bad — proves only that NestJS DI resolved a constructor, verifies zero domain rules
+describe("BookingService", () => {
+  it("should be defined", () => {
+    expect(service).toBeDefined();
+  });
+});
+
+// Good — replace or extend boilerplate with real invariant and failure-path tests
+describe("BookingService", () => {
+  it("rejects holding a slot that is already booked", async () => { ... });
+});
+```
+
+**Why:** Scaffolded `toBeDefined()` specs inflate spec file counts while leaving 100% of business rules untested.
+**Not a violation when:** `toBeDefined()` sits alongside real behavioural test cases in the same file.
 
 ---
 
@@ -689,6 +861,20 @@ the rejection may surface later as an unhandled rejection in an unrelated test.
 ### JT-502 — `done` callback mixed with promises
 **Severity:** minor · **Applies to:** test files
 **Detect:** A test taking `done` while also returning a promise or using `async`.
+
+```ts
+// Bad — Jest throws or times out when `async` is paired with `done`
+it("sends confirmation", async (done) => {
+  await mailer.send("a@b.com");
+  done();
+});
+
+// Good — use async/await only
+it("sends confirmation", async () => {
+  await expect(mailer.send("a@b.com")).resolves.toBeUndefined();
+});
+```
+
 **Why:** Jest fails or hangs on this combination, and errors before `done()` are swallowed.
 **Not a violation when:** Testing a genuinely callback-based API, with `done` only.
 
@@ -718,6 +904,20 @@ polling helper.
 ### JT-504 — Unhandled promise rejection inside a test
 **Severity:** major · **Applies to:** test files
 **Detect:** Fire-and-forget calls in tests; mocks configured to reject that nothing awaits.
+
+```ts
+// Bad — rejected promise settles after the test finishes and fails an unrelated test
+it("queues notification", () => {
+  notificationService.dispatchAsync(event); // not awaited!
+  expect(true).toBe(true);
+});
+
+// Good
+it("logs and surfaces failed notification dispatch", async () => {
+  await expect(notificationService.dispatchAsync(event)).rejects.toThrow(GatewayError);
+});
+```
+
 **Why:** The rejection lands in whichever test is running when it settles, producing
 failures that move around between runs.
 **Not a violation when:** The rejection is explicitly caught and asserted on.
@@ -730,6 +930,20 @@ failures that move around between runs.
 **Severity:** major · **Applies to:** test files
 **Detect:** A test that reads data another test wrote; assertions on cumulative call
 counts; a suite that fails under `--randomize` or when a single test is run with `-t`.
+
+```ts
+// Bad — second test only passes if first test ran before it
+let createdQuizId: string;
+it("creates a quiz", async () => { createdQuizId = (await repo.create(dto)).id; });
+it("loads the quiz", async () => { expect(await repo.findById(createdQuizId)).not.toBeNull(); });
+
+// Good — each test arranges its own prerequisite state
+it("loads an existing quiz by id", async () => {
+  const created = await repo.create(makeQuizDto());
+  await expect(repo.findById(created.id)).resolves.toMatchObject({ id: created.id });
+});
+```
+
 **Why:** Order-dependent suites break the moment someone adds, removes, or shards a test.
 **Not a violation when:** Never — sequence, if it matters, belongs inside one test.
 
@@ -778,7 +992,18 @@ deterministically.
 ### JT-604 — Shared database state between integration tests
 **Severity:** major · **Applies to:** integration tests
 **Detect:** No per-test cleanup; tests relying on seed data another test created; a
-`beforeAll` seed with mutations in individual tests.
+`beforeAll` seed with mutations in individual tests (in either Mongoose or PostgreSQL/TypeORM/Prisma).
+
+```ts
+// Bad — mutates shared DB tables without resetting between tests
+beforeAll(async () => { await dataSource.getRepository(Doctor).save(seedDoctor); });
+
+// Good — truncate/reset tables in beforeEach (or wrap each test in a rolled-back transaction / fresh Testcontainer)
+beforeEach(async () => {
+  await dataSource.query('TRUNCATE TABLE "bookings", "slot_holds", "doctors" RESTART IDENTITY CASCADE');
+});
+```
+
 **Why:** One failing test then cascades into ten, and the real failure is unfindable.
 **Not a violation when:** Each test creates its own uniquely-keyed data and cleans up.
 
@@ -788,8 +1013,42 @@ deterministically.
 **Severity:** major · **Applies to:** test files
 **Detect:** `it.skip`, `describe.skip`, `xit`, `it.todo` left in place, and — most
 serious — `it.only` / `describe.only`, which silently disables the rest of the file in CI.
+
+```ts
+// Bad — `.only` silently skips every sibling test while CI reports green
+describe.only("PaymentService", () => { ... });
+it.skip("handles Stripe webhook retries", () => { ... });
+
+// Good — remove `.only`/`.skip` before merge; track deferred work in an issue
+describe("PaymentService", () => { ... });
+```
+
 **Why:** `.only` turns a full suite into one test while CI still reports green.
 **Not a violation when:** `it.todo` marks planned work in a suite being actively written.
+
+---
+
+### JT-606 — Test harness, HTTP server, or `TestingModule` not closed after suite
+**Severity:** major · **Applies to:** test files
+**Detect:** Calling `Test.createTestingModule(...)`, `app.init()`, `mongoose.connect(...)`, `dataSource.initialize()`, or starting Redis/Testcontainers without `await app.close()` / `await moduleRef.close()` in `afterAll` or `afterEach`.
+
+```ts
+// Bad — leaves NestJS providers, TypeORM pools, and timers open, forcing `--forceExit`
+let app: INestApplication;
+beforeAll(async () => {
+  const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  app = mod.createNestApplication();
+  await app.init();
+});
+
+// Good — close the app and underlying connections cleanly in afterAll
+afterAll(async () => {
+  await app.close();
+});
+```
+
+**Why:** Unclosed harnesses leak sockets and database connections, forcing teams into `forceExit: true` (`JT-004`) and causing intermittent hangs in CI.
+**Not a violation when:** A single-test helper closes the module in `try { ... } finally { await moduleRef.close(); }`.
 
 ---
 
@@ -800,6 +1059,17 @@ serious — `it.only` / `describe.only`, which silently disables the rest of the
 **Detect:** A service, calculator, mapper, guard, or validator with no corresponding spec.
 Escalate to **critical** for authentication, authorization, grading, and scoring code.
 Report at file level: `src/modules/auth/auth.service.ts:1 — JT-701 (critical): no tests`.
+
+```text
+// Bad — business-critical module ships with zero spec coverage
+src/modules/auth/auth.service.ts          # 0 specs
+src/modules/booking/cancellation.policy.ts # 0 specs
+
+// Good — every service and policy with branching rules has a colocated spec
+src/modules/auth/auth.service.spec.ts
+src/modules/booking/cancellation.policy.spec.ts
+```
+
 **Why:** Untested auth and grading code is where a silent regression costs the most.
 **Not a violation when:** The module is a thin pass-through (a route table, a barrel, a
 config object).
@@ -811,6 +1081,21 @@ config object).
 **Detect:** Tests that call every method once with no meaningful assertion (see JT-401,
 JT-402); tests written per method rather than per rule; large `collectCoverageFrom`
 exclusions hiding untested modules.
+
+```ts
+// Bad — executes lines for coverage % without verifying any domain rule
+it("runs findAll", async () => {
+  const res = await service.findAll();
+  expect(res).toBeDefined();
+});
+
+// Good — asserts the filtering and ordering contract
+it("returns only active doctors sorted by rating descending", async () => {
+  const doctors = await service.findAll({ isActive: true });
+  expect(doctors.map((d) => d.id)).toEqual(["doc-top", "doc-mid"]);
+});
+```
+
 **Why:** Line coverage measures execution, not verification. A suite can reach 90% and
 assert nothing.
 **Not a violation when:** The tests state real rules and coverage follows as a by-product.
@@ -821,6 +1106,16 @@ assert nothing.
 **Severity:** major · **Applies to:** test files
 **Detect:** A service that throws domain errors (`NotFoundError`, `ConflictError`,
 `ExpiredOtpError`) with no spec asserting each one.
+
+```ts
+// Bad — service defines 3 throw branches; spec only tests the success branch
+it("verifies OTP", async () => { ... });
+
+// Good — each failure mode has an explicit negative test
+it("throws GoneException when the OTP TTL has elapsed", async () => { ... });
+it("throws UnauthorizedException when the OTP digest does not match", async () => { ... });
+```
+
 **Why:** Error paths are the contract the client depends on for status codes.
 **Not a violation when:** The error is a re-throw of a collaborator's error with no logic.
 
@@ -832,6 +1127,9 @@ assert nothing.
 caps) tested only in the middle of the range.
 
 ```ts
+// Bad — tests 80% pass and 20% fail, missing exact threshold 60% and 59.9%
+it("passes at 80", () => expect(gradeAttempt(80)).toBe(AttemptStatus.Passed));
+
 // Good
 it.each([
   { score: 59.9, expected: AttemptStatus.Failed },
@@ -851,6 +1149,19 @@ it.each([
 **Severity:** minor · **Applies to:** `*.controller.spec.ts`
 **Detect:** A controller spec that mocks the service, fakes `req`/`res`, and asserts
 `res.json` was called — verifying only the four lines of glue.
+
+```ts
+// Bad — mocks service and req/res, proving nothing about routing, pipes, or guards
+it("calls service.create", async () => {
+  await controller.create(fakeReq, fakeRes, next);
+  expect(mockService.create).toHaveBeenCalled();
+});
+
+// Good — test the HTTP boundary with supertest (see JT-707)
+const res = await request(app.getHttpServer()).post("/api/v1/quizzes").send(invalidDto);
+expect(res.status).toBe(400);
+```
+
 **Why:** Controllers are glue; the valuable test at that layer is an integration test
 through `supertest` that exercises routing, validation middleware, auth, and error mapping.
 **Not a violation when:** The controller contains real mapping logic worth isolating — in
@@ -880,4 +1191,28 @@ it("ignores duplicate booking confirmed events", async () => {
 
 **Why:** In event-driven architectures, brokers guarantee at-least-once delivery, not exactly-once. Consumers will receive duplicate messages during network retries and worker reboots. Without idempotency tests, bugs that charge or notify users multiple times pass unnoticed.
 **Not a violation when:** The event handler performs an inherently idempotent operation (e.g., an upsert or setting a static cache key).
+
+---
+
+### JT-707 — Missing HTTP boundary integration test for validation, auth, and error envelope
+**Severity:** major · **Applies to:** `tests/**`, `test/**`, `**/*.e2e-spec.ts`
+**Detect:** An HTTP service with only mocked unit tests and zero `supertest` integration tests exercising route wiring, `ValidationPipe`/Zod rejection (`400`), auth/role guards (`401`/`403`), and the global error envelope (`RS-401`, `RS-407`).
+
+```ts
+// Bad — 100% mocked unit tests, so missing ValidationPipe or unguarded route ships unnoticed
+
+// Good — supertest suite exercising real app wiring, pipes, guards, and error filter
+it("rejects unknown fields and returns standard error envelope", async () => {
+  const res = await request(app.getHttpServer())
+    .post("/api/v1/bookings")
+    .set("Authorization", `Bearer ${patientToken}`)
+    .send({ slotId: "s1", role: "admin" });
+
+  expect(res.status).toBe(400);
+  expect(res.body).toMatchObject({ success: false, error: { code: expect.any(String) } });
+});
+```
+
+**Why:** Validation pipes, global filters, route prefixes, and middleware ordering are invisible to unit tests. Only an HTTP-boundary test proves the app actually enforces its contract.
+**Not a violation when:** The service exposes no HTTP endpoints (e.g., a pure background worker or gRPC-only internal service tested via gRPC/broker integration specs).
 

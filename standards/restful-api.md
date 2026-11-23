@@ -18,7 +18,7 @@ and the false-positive rules.
 | `RS-5xx` | Authentication, authorization, transport |
 | `RS-6xx` | Versioning, headers, documentation |
 
-**Reference contract for this codebase** (from the project brief §8.B):
+**Reference contract across projects** (e.g., Online Exam brief §8.B, DOCURA, and ENR API envelopes):
 
 ```jsonc
 // success
@@ -33,21 +33,21 @@ and the false-positive rules.
 ## RS-0xx — Resource naming and URL design
 
 ### RS-001 — Verb in the URL path
-**Severity:** major · **Applies to:** `*.routes.ts`, `*.router.ts`
+**Severity:** major · **Applies to:** `*.routes.ts`, `*.router.ts`, `*.controller.ts`
 **Detect:** Path segments that are actions rather than resources: `/getQuizzes`,
-`/createUser`, `/quiz/delete/:id`, `/update-profile`.
-Grep hint: `router\.(get|post|put|patch|delete)\(['"]/(get|create|update|delete|list|add|remove)`
+`/createUser`, `/quiz/delete/:id`, `/update-profile`, `@Post('createBooking')`.
+Grep hint: `(router\.(get|post|put|patch|delete)|@(Get|Post|Put|Patch|Delete))\(['"]/?(get|create|update|delete|list|add|remove)`
 
 ```ts
 // Bad
 router.get('/getAllQuizzes', ...);
 router.post('/createQuiz', ...);
-router.delete('/deleteQuiz/:id', ...);
+@Delete('/deleteBooking/:id') ...
 
 // Good
 router.get('/quizzes', ...);
 router.post('/quizzes', ...);
-router.delete('/quizzes/:id', ...);
+@Delete('/bookings/:id') ...
 ```
 
 **Why:** The HTTP method is already the verb. Repeating it in the path doubles the vocabulary
@@ -169,9 +169,9 @@ the API as one unit.
 ## RS-1xx — HTTP methods and semantics
 
 ### RS-101 — Wrong method for the operation
-**Severity:** major · **Applies to:** `*.routes.ts`
+**Severity:** major · **Applies to:** `*.routes.ts`, `*.controller.ts`
 **Detect:** `GET` routes that create or mutate state; `POST` used to read; `GET` handlers
-that write to the database.
+that write to the database (`@Get` calling `.save()` / `.create()` / `.holdSlot()`).
 
 ```ts
 // Bad
@@ -192,9 +192,24 @@ when the query is too large for a URL, and should be documented.
 ---
 
 ### RS-102 — Non-idempotent handler behind an idempotent method
-**Severity:** major · **Applies to:** `*.routes.ts`, controllers
+**Severity:** major · **Applies to:** `*.routes.ts`, `*.controller.ts`
 **Detect:** `PUT` or `DELETE` handlers that fail or duplicate on retry: `PUT` that appends to
 an array, `DELETE` that 404s on the second call after succeeding on the first.
+
+```ts
+// Bad — PUT appends a duplicate slot on network retry
+@Put('doctors/:id/slots')
+addSlot(@Param('id') id: string, @Body() slot: SlotDto) {
+  return this.repo.pushSlot(id, slot);
+}
+
+// Good — PUT replaces the full set deterministically; DELETE is idempotent
+@Put('doctors/:id/schedule')
+replaceSchedule(@Param('id') id: string, @Body() dto: ScheduleDto) {
+  return this.repo.replaceSchedule(id, dto);
+}
+```
+
 **Why:** Clients, proxies, and job runners retry `PUT`/`DELETE` on timeout. Non-idempotent
 behaviour turns one retry into two attempts or a spurious error.
 **Not a violation when:** `POST` — it is explicitly not idempotent.
@@ -226,6 +241,21 @@ representation.
 **Severity:** minor · **Applies to:** app bootstrap
 **Detect:** No catch-all 404 handler, so an unknown path falls through to the framework's
 HTML error page; or an unmatched method on a known path returns 404 instead of 405.
+
+```ts
+// Bad — Express default HTML "Cannot GET /api/v1/unknown" leaks framework info
+app.use('/api/v1/quizzes', quizRouter);
+
+// Good — JSON 404 catch-all registered after all routers
+app.use('/api/v1/quizzes', quizRouter);
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: { code: 'ROUTE_NOT_FOUND', message: `Route ${req.method} ${req.originalUrl} not found` },
+  });
+});
+```
+
 **Why:** A client hitting `DELETE /api/quizzes` should learn the method is unsupported, not
 that the collection does not exist.
 **Not a violation when:** A JSON 404 catch-all exists; 405 handling is a refinement, not a
@@ -278,8 +308,8 @@ res.status(200).json({ success: true, data: quizzes });     // read
 res.status(204).send();                                     // deleted, no body
 ```
 
-**Why:** Status is the part of the response a client can branch on without parsing. Brief
-§8.B.3 names `201` for registration and for starting an attempt specifically.
+**Why:** Status is the part of the response a client can branch on without parsing (for example,
+`201 Created` on registration, starting an attempt, or creating a booking).
 **Not a violation when:** The project consistently returns `200` with a body for deletes and
 documents it.
 
@@ -327,8 +357,19 @@ as 5xx destroys error budgets and hides real incidents.
 **Severity:** minor · **Applies to:** middleware, controllers
 **Detect:** Missing/invalid token returning 403; an authenticated user lacking a role
 returning 401.
+
+```ts
+// Bad — missing token returns 403, wrong role returns 401
+if (!token) throw new ForbiddenException('Missing token');
+if (user.role !== Role.Admin) throw new UnauthorizedException('Admin only');
+
+// Good
+if (!token) throw new UnauthorizedException('Missing or invalid access token');
+if (user.role !== Role.Admin) throw new ForbiddenException('Admin role required');
+```
+
 **Why:** 401 means "authenticate and retry" — it invites the client to refresh a token. 403
-means "authenticated, still not allowed" — retrying is pointless. Brief §8.B.3 defines both.
+means "authenticated, still not allowed" — retrying is pointless.
 **Not a violation when:** The API deliberately returns 404 instead of 403 to avoid disclosing
 that a resource exists — document that choice.
 
@@ -338,6 +379,15 @@ that a resource exists — document that choice.
 **Severity:** minor · **Applies to:** controllers, services
 **Detect:** Duplicate email, double submission, or "attempt already in progress" returning
 400 rather than 409; expired-timer submissions returning 500.
+
+```ts
+// Bad
+if (slot.status !== 'available') throw new BadRequestException('Slot already booked');
+
+// Good
+if (slot.status !== 'available') throw new ConflictException({ code: 'SLOT_ALREADY_BOOKED', message: 'Slot is already booked' });
+```
+
 **Why:** 409 tells the client the request was well-formed but conflicts with current state —
 a different remedy than fixing the payload.
 **Not a violation when:** The API documents a flat 400 for all client errors and returns a
@@ -349,24 +399,55 @@ machine-readable `error.code` that distinguishes them.
 **Severity:** minor · **Applies to:** controllers, middleware
 **Detect:** Bare numeric literals at call sites where the project has a status constant
 module. Grep hint: `res.status(4\d\d)|res.status(5\d\d)|new AppError\([^,]+, *\d{3}\)`
-**Why:** Named constants (`statusCode.NotFound`) make a wrong code visible in review.
+
+```ts
+// Bad — raw status numbers scattered when HttpStatus / statusCode enum exists
+res.status(409).json(...);
+
+// Good
+res.status(HttpStatus.CONFLICT).json(...);
+```
+
+**Why:** Named constants (`HttpStatus.NOT_FOUND`, `statusCode.NotFound`) make a wrong code visible in review.
 **Not a violation when:** No constants module exists and the project is consistent.
+
+---
+
+### RS-207 — Wrong status code for rate limiting (`429`) or upstream failures (`502`/`503`/`504`)
+**Severity:** minor · **Applies to:** controllers, error filters/middleware, rate limiters
+**Detect:** Rate-limit or OTP-cooldown rejections returning `400`/`403`/`500` instead of `429 Too Many Requests`; payment/SMS/AI gateway timeouts or unreachable upstreams returning `500` instead of `502`/`503`/`504`.
+
+```ts
+// Bad — upstream Stripe timeout and rate-limit breach both surface as generic 500/400
+if (attempts > MAX_OTP_ATTEMPTS) throw new BadRequestException('Too many attempts');
+
+// Good — semantic status codes so clients and gateways know whether to back off or retry
+if (attempts > MAX_OTP_ATTEMPTS) throw new HttpException({ code: 'RATE_LIMITED', message: 'Retry later' }, HttpStatus.TOO_MANY_REQUESTS);
+// Gateway timeout -> 504 GATEWAY_TIMEOUT; dependency unavailable -> 503 SERVICE_UNAVAILABLE
+```
+
+**Why:** Clients, mobile SDKs, and API gateways rely on `429` (often with `Retry-After`) and `502`/`503`/`504` to apply backoff rather than reporting server bugs.
+**Not a violation when:** An internal non-HTTP worker handles retries over a message queue without an HTTP surface.
 
 ---
 
 ## RS-3xx — Request design
 
 ### RS-301 — Input reaches a handler unvalidated
-**Severity:** critical · **Applies to:** `*.routes.ts`
-**Detect:** A route with a body, params, or query and no validation middleware in the chain.
+**Severity:** critical · **Applies to:** `*.routes.ts`, `*.controller.ts`, `main.ts`
+**Detect:** A route with a body, params, or query and no validation middleware (`validate(...)`) in Express, or missing global `ValidationPipe` / un-decorated DTOs in NestJS (`TS-507`).
 Pairs with `CC-206`.
 
 ```ts
 // Bad
 router.post('/quizzes/:id/attempts', isAuth, quizController.start);
 
-// Good
+// Good — Express
 router.post('/quizzes/:id/attempts', isAuth, validate({ params: quizIdSchema }), quizController.start);
+
+// Good — NestJS
+@Post('quizzes/:id/attempts')
+start(@Param('id', ParseUUIDPipe) id: string, @Body() dto: StartAttemptDto) { ... }
 ```
 
 **Why:** Unvalidated `req.body` reaching a Mongoose query is how mass assignment and
@@ -421,6 +502,9 @@ role.
 client `limit` with no ceiling. Pairs with `CC-803`.
 
 ```ts
+// Bad — returns every record in the collection or honours ?limit=1000000
+const doctors = await this.doctorRepo.find({ where: { specialtyId } });
+
 // Good
 const { page, limit } = parsePagination(req.query);   // limit capped at 100
 res.status(200).json({ success: true, data: items, meta: { page, limit, total } });
@@ -435,6 +519,16 @@ res.status(200).json({ success: true, data: items, meta: { page, limit, total } 
 **Severity:** minor · **Applies to:** controllers
 **Detect:** `?page`/`?limit` in one module and `?skip`/`?size` in another; sort passed as a
 raw Mongo object in a query string.
+
+```ts
+// Bad — mixed pagination keys and raw JSON sort object passed into Mongoose `.sort()`
+GET /api/v1/doctors?skip=0&size=20&sort={"fee":-1}
+GET /api/v1/bookings?page=1&limit=10
+
+// Good — one allowlisted query contract across every endpoint
+GET /api/v1/doctors?page=1&limit=20&sortBy=fee&sortOrder=desc
+```
+
 **Why:** One convention across the API is the difference between a client writing one helper
 and writing one per endpoint. A raw sort object in the query string is also an injection
 surface.
@@ -448,12 +542,36 @@ surface.
 handlers assuming JSON without checking.
 
 ```ts
+// Bad — unbounded JSON body parser allows multi-hundred-MB payload DoS
+app.use(express.json());
+
 // Good
 app.use(express.json({ limit: '100kb' }));
 ```
 
 **Why:** An unbounded JSON body is a trivial memory-exhaustion vector.
 **Not a violation when:** A gateway enforces the limit upstream and that is documented.
+
+---
+
+### RS-307 — Unknown request fields silently accepted instead of stripped or rejected
+**Severity:** major · **Applies to:** validation middleware, `main.ts`, `*.dto.ts`
+**Detect:** NestJS `ValidationPipe` missing `whitelist: true` and `forbidNonWhitelisted: true`; Zod schemas using `.passthrough()` on public write endpoints. Pairs with `CC-802`, `TS-507`.
+
+```ts
+// Bad — unknown fields like `role: "admin"` or `isVerified: true` survive into DTOs
+app.useGlobalPipes(new ValidationPipe({ transform: true }));
+
+// Good — strip and reject unexpected properties at the HTTP boundary
+app.useGlobalPipes(new ValidationPipe({
+  whitelist: true,
+  forbidNonWhitelisted: true,
+  transform: true,
+}));
+```
+
+**Why:** Silently admitting extra properties invites mass-assignment bugs and hides client payload typos (`consultation_fee` vs `consultationFee`).
+**Not a violation when:** An internal webhook or third-party callback endpoint deliberately accepts forward-compatible extra fields and maps only explicit keys.
 
 ---
 
@@ -483,8 +601,7 @@ and a bug when a new endpoint picks a fourth. In NestJS applications, standard h
 
 ### RS-402 — Error response carries no machine-readable code
 **Severity:** major · **Applies to:** error middleware, error classes
-**Detect:** Error bodies containing only `message`. Brief §8.B.4 requires
-`error: { code, message }`.
+**Detect:** Error bodies containing only `message` instead of `error: { code, message }`.
 
 ```ts
 // Bad
@@ -525,9 +642,16 @@ attacker.
 
 ### RS-404 — Persistence document returned as the API contract
 **Severity:** major · **Applies to:** controllers, services
-**Detect:** A Mongoose document or `.lean()` result passed to `res.json` with no mapper;
-`password`, `__v`, OTP fields, or `correctAnswer` reaching a client response. Pairs with
-`CC-801`.
+**Detect:** A Mongoose document, TypeORM entity, Prisma record, or `.lean()` result passed to the response with no mapper; `password`, `__v`, OTP fields, or `correctAnswer` reaching a client response. Pairs with `CC-801`.
+
+```ts
+// Bad — returns raw DB document including passwordHash, otpDigest, and __v
+return res.status(200).json({ success: true, data: userDoc });
+
+// Good — map explicitly to a public response DTO
+return res.status(200).json({ success: true, data: toUserResponseDto(userDoc) });
+```
+
 **Why:** Schema is not API. Without an explicit mapper, every new field is published by
 default — and on this project, the first leak is the answer key or the password hash.
 **Not a violation when:** A projection provably excludes the sensitive fields *and* the
@@ -561,6 +685,16 @@ questions: questions.map((question) => ({
 **Severity:** minor · **Applies to:** controllers
 **Detect:** One endpoint returning a bare array in one branch and `{ data, meta }` in another;
 `data` sometimes an object and sometimes a string.
+
+```ts
+// Bad — callers cannot type `response.data` consistently
+if (items.length === 0) return res.json({ success: true, data: 'No doctors found' });
+return res.json({ success: true, data: items, meta });
+
+// Good — empty collection keeps the exact same array + meta envelope
+return res.json({ success: true, data: items, meta });
+```
+
 **Why:** Clients type responses once per endpoint. A conditional shape forces defensive
 parsing everywhere.
 **Not a violation when:** The variants are discriminated and documented.
@@ -598,9 +732,8 @@ Grep hint: `app.useGlobalFilters` missing in NestJS `main.ts`, or custom error r
 ## RS-5xx — Authentication, authorization, transport
 
 ### RS-501 — Protected route without an auth guard
-**Severity:** critical · **Applies to:** `*.routes.ts`
-**Detect:** A route touching user-scoped or admin-scoped data with no auth middleware in its
-chain. Compare sibling routes in the same file — one guarded, one not, is the common shape.
+**Severity:** critical · **Applies to:** `*.routes.ts`, `*.controller.ts`
+**Detect:** A route touching user-scoped or admin-scoped data with no auth middleware or NestJS guard (`@UseGuards(...)`) in its chain. Compare sibling routes in the same file — one guarded, one not, is the common shape.
 
 ```ts
 // Bad
@@ -608,9 +741,15 @@ router.post('/admin/quizzes', isAuth, controller.create);
 router.get('/admin/quizzes', controller.listForAdmin);       // no guard, returns answer keys
 router.delete('/admin/quizzes/:id', controller.remove);      // no guard
 
-// Good
+// Good — Express subtree guard
 const adminOnly = [isAuth, authorize(Role.Admin)];
 router.use('/admin', ...adminOnly);
+
+// Good — NestJS controller-level guard (or global APP_GUARD with @Public() opt-out)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.Admin)
+@Controller('admin/quizzes')
+export class AdminQuizzesController {}
 ```
 
 **Why:** One forgotten guard is the whole breach. Applying it to the subtree makes it
@@ -620,8 +759,22 @@ impossible to add an unprotected sibling by accident.
 ---
 
 ### RS-502 — Authentication without authorization
-**Severity:** critical · **Applies to:** `*.routes.ts`, controllers
-**Detect:** Admin-only operations guarded by `isAuth` alone, with no role check anywhere.
+**Severity:** critical · **Applies to:** `*.routes.ts`, `*.controller.ts`
+**Detect:** Admin-only operations guarded by `isAuth` or `@UseGuards(JwtAuthGuard)` alone, with no role check anywhere.
+
+```ts
+// Bad — any authenticated patient/student can cancel another doctor's schedule or delete a quiz
+@UseGuards(JwtAuthGuard)
+@Delete('admin/quizzes/:id')
+remove(@Param('id') id: string) { ... }
+
+// Good — enforce both identity (JwtAuthGuard) and role/permission (RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.Admin)
+@Delete('admin/quizzes/:id')
+remove(@Param('id') id: string) { ... }
+```
+
 **Why:** `isAuth` proves who the caller is, not that they may act. Any registered student can
 then delete a quiz.
 **Not a violation when:** Every authenticated user is genuinely permitted.
@@ -651,6 +804,15 @@ record is theirs. This is the most common real vulnerability in CRUD APIs.
 ### RS-504 — Credentials or tokens in the URL
 **Severity:** critical · **Applies to:** `*.routes.ts`, controllers
 **Detect:** `?token=`, `?password=`, `?otp=` in query strings or path segments.
+
+```ts
+// Bad — secrets land in proxy logs, browser history, and Referer headers
+POST /api/v1/auth/verify-otp?otp=123456&email=user@example.com
+
+// Good — pass sensitive credentials in the request body or Authorization header
+POST /api/v1/auth/verify-otp   // body: { "email": "user@example.com", "otp": "123456" }
+```
+
 **Why:** URLs land in access logs, proxy logs, browser history, and `Referer` headers.
 **Not a violation when:** A single-use, short-lived, hashed reset token in a path is
 documented and expires quickly — still prefer the body.
@@ -659,10 +821,14 @@ documented and expires quickly — still prefer the body.
 
 ### RS-505 — Security headers and rate limiting absent
 **Severity:** major · **Applies to:** app bootstrap
-**Detect:** No `helmet()`; no rate limiter on `/auth/login`, `/auth/register`, or password
+**Detect:** No `helmet()`; no rate limiter (`express-rate-limit` or `@nestjs/throttler`) on `/auth/login`, `/auth/register`, OTP verification, or password
 reset; `cors()` with no origin allowlist.
 
 ```ts
+// Bad — open CORS reflection and unlimited OTP/password brute-force attempts
+app.use(cors());
+app.use('/api/v1/auth', authRouter);
+
 // Good
 app.use(helmet());
 app.use(cors({ origin: env.CLIENT_URL, credentials: true }));
@@ -679,8 +845,47 @@ argument reflects any origin.
 **Severity:** minor · **Applies to:** `modules/auth/**`
 **Detect:** Login returning "user not found" vs "wrong password"; forgot-password returning
 404 for an unknown email.
+
+```ts
+// Bad — distinct messages let attackers enumerate registered emails
+if (!user) throw new NotFoundException('Email not registered');
+if (!passwordMatches) throw new UnauthorizedException('Wrong password');
+
+// Good — uniform message and status on failure
+if (!user || !passwordMatches) {
+  throw new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' });
+}
+```
+
 **Why:** Distinct messages let an attacker enumerate registered addresses.
 **Not a violation when:** The endpoint is admin-only.
+
+---
+
+### RS-507 — Missing webhook signature verification or raw-body validation
+**Severity:** critical · **Applies to:** webhook routes/controllers (e.g., `POST /webhooks/stripe`)
+**Detect:** Webhook handlers accepting parsed JSON `req.body` directly without verifying the provider's cryptographic HMAC signature (`stripe.webhooks.constructEvent`) against the unparsed raw request buffer (`rawBody`).
+
+```ts
+// Bad — anyone on the internet can POST a fake `payment_intent.succeeded` event
+@Post('webhooks/stripe')
+handleWebhook(@Body() event: any) {
+  return this.paymentService.markPaid(event.data.object.id);
+}
+
+// Good — verify cryptographic signature against raw bytes before processing
+@Post('webhooks/stripe')
+handleWebhook(
+  @Req() req: RawBodyRequest<Request>,
+  @Headers('stripe-signature') signature: string,
+) {
+  const event = this.stripe.webhooks.constructEvent(req.rawBody, signature, this.webhookSecret);
+  return this.paymentService.handleVerifiedEvent(event);
+}
+```
+
+**Why:** Without signature verification over raw bytes, an unauthenticated attacker can forge payment confirmations, issue fraudulent refunds, or mark bookings as paid.
+**Not a violation when:** Never for external financial or identity webhooks.
 
 ---
 
@@ -688,7 +893,18 @@ argument reflects any origin.
 
 ### RS-601 — No API version in the path
 **Severity:** minor · **Applies to:** app bootstrap
-**Detect:** Routes mounted at `/api/...` with no `/v1` segment.
+**Detect:** Routes mounted at `/api/...` with no `/v1` segment (e.g., missing `app.setGlobalPrefix('api/v1')` in NestJS or `app.use('/api/v1', ...)` in Express).
+
+```ts
+// Bad
+app.use('/api/quizzes', quizRouter);
+// or NestJS: app.setGlobalPrefix('api');
+
+// Good
+app.use('/api/v1/quizzes', quizRouter);
+// or NestJS: app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready'] });
+```
+
 **Why:** Without a version segment, the first breaking change breaks every client at once.
 **Not a violation when:** Versioning is handled by a header and that is documented.
 
@@ -698,8 +914,21 @@ argument reflects any origin.
 **Severity:** minor · **Applies to:** `README.md`, `docs/`, Postman collections
 **Detect:** Routes with no entry in the API documentation; documented endpoints that no
 longer exist; a documented response shape that disagrees with the controller.
-**Why:** Brief §6 makes the endpoint table a deliverable. A drifted table is worse than none —
-it is trusted and wrong.
+
+```ts
+// Bad — route shipped in controller with no OpenAPI decorator or Postman/README update
+@Post('bookings/:id/reschedule')
+reschedule(...) {}
+
+// Good — Swagger/OpenAPI contract or docs updated alongside the route
+@ApiOperation({ summary: 'Reschedule an active booking' })
+@ApiResponse({ status: 200, type: BookingResponseDto })
+@Post('bookings/:id/reschedule')
+reschedule(...) {}
+```
+
+**Why:** An endpoint table or OpenAPI spec that drifts from the code is worse than none —
+clients trust it and fail in integration.
 **Not a violation when:** Generated from the code (OpenAPI) and regenerated in CI.
 
 ---
@@ -709,6 +938,10 @@ it is trusted and wrong.
 **Detect:** `201` responses with no `Location` header pointing at the new resource.
 
 ```ts
+// Bad — returns 201 Created without pointing the client to the created resource URL
+res.status(201).json({ success: true, data: attempt });
+
+// Good
 res.status(201).location(`/api/v1/attempts/${attempt.id}`).json({ success: true, data: attempt });
 ```
 
@@ -731,7 +964,33 @@ in different units across endpoints (minutes here, seconds there, milliseconds e
 { durationMinutes: 30, timeSpentSeconds: 247, submittedAt: '2026-08-03T10:14:00.000Z' }
 ```
 
-**Why:** Brief §4 specifies fastest completion time **in seconds**. A unitless number is a
-guess at the client, and rounding to minutes destroys sub-minute values entirely.
+**Why:** A unitless number forces every client to guess, and rounding fast completions to minutes destroys sub-minute precision.
 **Not a violation when:** The unit is in the field name or the API documentation defines it
 globally.
+
+---
+
+### RS-605 — Missing health/readiness endpoints or leaking internals in health output
+**Severity:** minor · **Applies to:** app bootstrap, health module
+**Detect:** Production HTTP services lacking liveness (`/health`) and dependency-aware readiness (`/health/ready`) probes, or health endpoints returning raw DB URIs, secrets, or stack traces.
+
+```ts
+// Bad — exposes database host/credentials or blindly returns 200 even when Postgres is down
+@Get('health')
+health() {
+  return { ok: true, db: process.env.DATABASE_URL };
+}
+
+// Good — liveness stays lightweight; readiness probes Postgres/Redis and returns 503 on failure
+@Get('health')
+liveness() { return { status: 'ok' }; }
+
+@Get('health/ready')
+@HealthCheck()
+readiness() {
+  return this.health.check([() => this.db.pingCheck('postgres'), () => this.redis.pingCheck('redis')]);
+}
+```
+
+**Why:** Orchestrators and load balancers rely on `/health/ready` (`200` vs `503`) to stop routing traffic when Postgres or Redis is unreachable, and unauthenticated health routes must never leak environment config.
+**Not a violation when:** A single-process CLI or non-HTTP worker uses container process healthchecks without an HTTP server.

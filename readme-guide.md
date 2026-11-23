@@ -656,10 +656,11 @@ inconsistently right now.
 - [ ] **Dependencies** — how a new one is justified and approved.
 - [ ] **Formatting** — one line: "the tool owns it", plus the config link.
 
-Your projects already have four of these written up in
+Your projects already have five of these written up in
 [`standards/`](./standards/) — [`clean-code.md`](./standards/clean-code.md),
-[`typescript.md`](./standards/typescript.md), [`testing-jest.md`](./standards/testing-jest.md)
-and [`restful-api.md`](./standards/restful-api.md). Read one of them as a worked example of
+[`typescript.md`](./standards/typescript.md), [`testing-jest.md`](./standards/testing-jest.md),
+[`restful-api.md`](./standards/restful-api.md), and
+[`modular-structure.md`](./standards/modular-structure.md). Read one of them as a worked example of
 everything in 7.4.
 
 ## 7.6 How a rule changes

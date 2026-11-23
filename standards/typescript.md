@@ -56,6 +56,18 @@ folder is acceptable if it is documented and shrinking.
 **Severity:** major · **Applies to:** `tsconfig.json`
 **Detect:** Flag absent while the code indexes arrays/records and dereferences the result
 directly (`req.params.id.trim()`, `rows[0].name`).
+
+```ts
+// Bad — compiles when noUncheckedIndexedAccess is false, crashes at runtime on empty rows
+const firstSlot = slots[0];
+return firstSlot.startTime;
+
+// Good — with noUncheckedIndexedAccess: true, compiler forces explicit absence check
+const firstSlot = slots[0];
+if (!firstSlot) throw new NotFoundException("No available slots");
+return firstSlot.startTime;
+```
+
 **Why:** Without it, `arr[0]` is typed as present even when the array is empty — the single
 most common source of runtime `undefined` in this codebase's shape of code.
 **Not a violation when:** Enabling it is queued as tracked work and `src/**` currently
@@ -88,6 +100,15 @@ where the compiler actually runs. Then type errors ship.
 **Severity:** major · **Applies to:** `tsconfig.json`
 **Detect:** `"module": "CommonJS"` with `.js` ESM-style import specifiers; `"NodeNext"`
 without extensions on relative imports; `"target"` below `ES2020` on a modern Node runtime.
+
+```jsonc
+// Bad — NodeNext demands explicit .js extensions; CommonJS + ESM flags silently mismatch runtime
+{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "node", "target": "ES6" } }
+
+// Good — paired module + moduleResolution matching package.json "type"
+{ "compilerOptions": { "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext" } }
+```
+
 **Why:** Mismatch produces errors that only appear at runtime, usually as
 `ERR_MODULE_NOT_FOUND` after a successful build.
 **Not a violation when:** A bundler or loader demonstrably reconciles the difference.
@@ -398,10 +419,42 @@ constants are an action-at-a-distance bug waiting to happen.
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** `field?: string | null` where only one of the two states is real; a schema with
 `default: null` typed as optional.
+
+```ts
+// Bad — forces every caller to distinguish undefined vs null when only one means "absent"
+interface DoctorFilter { specialtyId?: string | null; }
+
+// Good — pick one representation matching the layer contract
+interface DoctorFilter { specialtyId?: string; }            // omitted in query DTO
+interface DoctorRecord { deletedAt: Date | null; }        // explicit nullable DB column
+```
+
 **Why:** Three states (`present`, `undefined`, `null`) where the domain has two forces every
 consumer to handle a case that never occurs.
 **Not a violation when:** Both states are meaningful and documented ("never set" vs
 "explicitly cleared").
+
+---
+
+### TS-208 — Primitive obsession on adjacent domain identifiers and value objects
+**Severity:** minor · **Applies to:** `src/**/*.ts`
+**Detect:** Functions accepting multiple interchangeable raw `string` IDs (`(doctorId: string, patientId: string, clinicId: string)`) or raw numbers for domain quantities instead of branded IDs, value objects, or a named parameter object (`CC-104`).
+
+```ts
+// Bad — patientId and doctorId can be swapped silently at any call site
+function holdSlot(doctorId: string, clinicId: string, patientId: string, slotId: string): Promise<Hold>;
+
+// Good — branded IDs or named input object make parameter swaps a compile error
+type Brand<T, Name extends string> = T & { readonly __brand: Name };
+type DoctorId = Brand<string, "DoctorId">;
+type PatientId = Brand<string, "PatientId">;
+
+interface HoldSlotInput { doctorId: DoctorId; clinicId: string; patientId: PatientId; slotId: string }
+function holdSlot(input: HoldSlotInput): Promise<Hold>;
+```
+
+**Why:** TypeScript treats every raw `string` as identical. Transposed arguments in multi-ID calls compile cleanly and corrupt foreign keys or authorization checks in production.
+**Not a violation when:** A single-ID lookup (`findById(id: string)`) or a small helper where a typed parameter object already names every field.
 
 ---
 
@@ -429,6 +482,16 @@ export async function getQuizForStudent(id: string): Promise<StudentQuizView> { 
 ### TS-302 — Async function not returning a `Promise` type
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** `async` functions annotated with a non-`Promise` type, or `Promise<any>`.
+
+```ts
+// Bad
+export async function getDoctorSummary(id: string): Promise<any> { ... }
+
+// Good
+export async function getDoctorSummary(id: string): Promise<DoctorSummaryDto> { ... }
+export async function revokeSession(sessionId: string): Promise<void> { ... }
+```
+
 **Why:** `Promise<any>` erases the awaited type everywhere the result flows.
 **Not a violation when:** `Promise<void>` — that is correct and should be explicit.
 
@@ -456,19 +519,23 @@ relationship between inputs and outputs.
 
 ### TS-304 — Public signature typed to the persistence layer
 **Severity:** major · **Applies to:** `src/**/*.service.ts`, shared types
-**Detect:** Service or controller signatures using `HydratedDocument<T>`, `Document`,
-`ObjectId`, or a Mongoose model type.
+**Detect:** Service or controller signatures using Mongoose `HydratedDocument<T>` / `Document` /
+`ObjectId`, TypeORM `@Entity()` classes across module boundaries, or raw Prisma generated models
+on public API contracts.
 
 ```ts
 // Bad
 async getProfile(id: ObjectId): Promise<HydratedDocument<IUser>>
+async getBooking(id: string): Promise<BookingOrmEntity>
 
 // Good
 async getProfile(id: string): Promise<UserProfile>
+async getBooking(id: string): Promise<BookingSummaryDto>
 ```
 
-**Why:** The document type carries Mongoose methods, `__v`, and mutability into layers that
-should never see them — and makes those layers untestable without Mongoose.
+**Why:** Persistence types carry ORM metadata (`__v`, lazy proxies, internal foreign keys) and
+mutability into layers that should never see them — and make those layers untestable without
+the database driver.
 **Not a violation when:** The file is the repository or a mapper.
 
 ---
@@ -477,6 +544,18 @@ should never see them — and makes those layers untestable without Mongoose.
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Multiple optional parameters where certain combinations are invalid and only a
 comment says so.
+
+```ts
+// Bad — caller can pass both or neither; invalid combinations only fail at runtime
+function searchTrips(originId?: string, destinationId?: string, tripNumber?: string): Promise<Trip[]>;
+
+// Good — discriminated input union makes illegal combinations unrepresentable
+type TripLookup =
+  | { by: "route"; originId: string; destinationId: string }
+  | { by: "number"; tripNumber: string };
+function searchTrips(criteria: TripLookup): Promise<Trip[]>;
+```
+
 **Why:** Make illegal states unrepresentable — two named functions, or a discriminated
 input union, beat a signature that documents its own invalid combinations.
 **Not a violation when:** The optionality is genuinely orthogonal.
@@ -533,6 +612,18 @@ const showAnswers = options.showAnswers ?? true;
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** `?.` chains ending in a silently-undefined expression on a path where absence
 is an error (`user?.email` when a user must exist).
+
+```ts
+// Bad — if patient is missing, sends email to `undefined` instead of failing loudly
+const patient = await this.patientRepo.findById(booking.patientId);
+await this.mailer.sendReceipt(patient?.email ?? "", receipt);
+
+// Good — fail fast on required domain records
+const patient = await this.patientRepo.findById(booking.patientId);
+if (!patient) throw new NotFoundException(`Patient ${booking.patientId} not found`);
+await this.mailer.sendReceipt(patient.email, receipt);
+```
+
 **Why:** `?.` converts a crash into a silent wrong value — worse, not better, when the
 value is required.
 **Not a violation when:** Absence is legitimately expected and handled right after.
@@ -625,15 +716,16 @@ boundary or every downstream field access is unchecked.
 ---
 
 ### TS-504 — Environment configuration untyped or unvalidated
-**Severity:** major · **Applies to:** `src/config/**`
-**Detect:** `process.env.X!` or `process.env.X as string` in the config module; no schema
-validating required variables at startup. Pairs with `CC-701`.
+**Severity:** major · **Applies to:** `src/config/**`, `src/app.module.ts`
+**Detect:** `process.env.X!`, `process.env.X as string`, `String(process.env.X)`, or `process.env.X || ""`
+in the config module; no schema validating required variables at startup. Pairs with `CC-701`.
 
 ```ts
 // Bad
 export const JWT_SECRET = process.env.JWT_SECRET!;
+export const REDIS_URL = String(process.env.REDIS_URL); // becomes "undefined" when unset!
 
-// Good
+// Good — Express (Zod fail-fast at boot)
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]),
   PORT: z.coerce.number().default(3000),
@@ -642,10 +734,15 @@ const envSchema = z.object({
 });
 export const env = envSchema.parse(process.env);      // fails loudly at boot
 export type Env = z.infer<typeof envSchema>;
+
+// Good — NestJS (validated ConfigModule at boot)
+ConfigModule.forRoot({
+  isGlobal: true,
+  validate: (raw) => envSchema.parse(raw),
+});
 ```
 
-**Why:** `!` on env turns a missing variable into an undefined secret — JWTs then sign with
-`undefined`, which does not throw until much later.
+**Why:** `!`, `String(...)`, or `as string` on env turns a missing variable into `undefined` or `"undefined"` — JWTs then sign with a known string or crash much later in production.
 **Not a violation when:** Never for required variables.
 
 ---
@@ -655,6 +752,16 @@ export type Env = z.infer<typeof envSchema>;
 **Detect:** A runtime dependency used in TS with no bundled types and no `@types/*`
 counterpart; `@types` packages listed under `dependencies`; type packages whose major
 version disagrees with the runtime package.
+
+```jsonc
+// Bad — @types shipped in production dependencies and major version skewed from runtime
+"dependencies": { "express": "^5.0.0", "@types/express": "^4.17.21" }
+
+// Good — matching major versions with @types under devDependencies
+"dependencies": { "express": "^4.21.0" },
+"devDependencies": { "@types/express": "^4.17.21" }
+```
+
 **Why:** Missing types silently degrade a whole import to `any`; mismatched versions
 describe an API that is not there.
 **Not a violation when:** The package ships its own types.
@@ -665,6 +772,15 @@ describe an API that is not there.
 **Severity:** minor · **Applies to:** `package.json`, `src/**/*.ts`
 **Detect:** Both `bcrypt` and `bcryptjs`; both `joi` and `zod`; two HTTP clients; two
 loggers. Grep the import sites to confirm both are actually used.
+
+```jsonc
+// Bad — two validation libraries and two hashers active in the same service
+"dependencies": { "bcrypt": "^5.1.1", "bcryptjs": "^2.4.3", "joi": "^17.13.0", "zod": "^3.23.0" }
+
+// Good — standardize on one stack across the repository
+"dependencies": { "bcrypt": "^5.1.1", "zod": "^3.23.0" }
+```
+
 **Why:** Two validation stacks means two definitions of "valid", and reviewers must know
 which one guards a given route.
 **Not a violation when:** A migration is in progress and tracked.
@@ -730,6 +846,55 @@ await this.prisma.$queryRaw`SELECT * FROM doctors WHERE specialty = ${specialty}
 
 ---
 
+### TS-509 — PostgreSQL `decimal`/`numeric`/`bigint` ORM column typed as `number` without a transformer
+**Severity:** critical · **Applies to:** `src/**/*.entity.ts`, `src/**/*.repository.ts`
+**Detect:** TypeORM `@Column({ type: "decimal" | "numeric" | "bigint" })` annotated as `: number` with no `transformer` option, causing Postgres `node-pg` to return a runtime `string` inside a field typed `number`. Pairs with `CC-806`.
+
+```ts
+// Bad — runtime value is "150.00", so `doctor.fee + 10` evaluates to "150.0010"
+@Column({ type: "decimal", precision: 10, scale: 2 })
+consultationFee: number;
+
+// Good — store exact integer minor units (piastres/cents), or keep string, or attach a transformer
+@Column({ type: "integer" })
+consultationFeePiastres: number;
+
+// Good alternative — explicit numeric transformer if DECIMAL is required
+@Column({ type: "decimal", precision: 10, scale: 2, transformer: numericTransformer })
+consultationFee: number;
+```
+
+**Why:** TypeScript trusts the `: number` annotation while `pg` returns `decimal`/`numeric`/`bigint` as `string` to avoid IEEE-754 precision loss. Arithmetic silently turns into string concatenation.
+**Not a violation when:** The property is explicitly typed `string` (for `Decimal.js` / `BigInt`) or uses integer minor-unit columns (`integer`).
+
+---
+
+### TS-510 — Untyped `ConfigService.get()` or string DI token erasing provider type
+**Severity:** major · **Applies to:** `src/**/*.ts` in NestJS codebases
+**Detect:** `this.configService.get("KEY")` returning `any` because `ConfigService` lacks `<Env, true>`, or `@Inject("STRING_TOKEN")` paired with `: any` or an unverified cast.
+
+```ts
+// Bad — ConfigService.get() returns `any` by default; string token has no type safety
+constructor(
+  private readonly config: ConfigService,
+  @Inject("PAYMENT_GATEWAY") private readonly gateway: any,
+) {}
+const secret = this.config.get("JWT_SECRET"); // typed `any`
+
+// Good — generic ConfigService<Env, true> + typed Symbol InjectionToken
+export const PAYMENT_GATEWAY = Symbol("PAYMENT_GATEWAY");
+constructor(
+  private readonly config: ConfigService<Env, true>,
+  @Inject(PAYMENT_GATEWAY) private readonly gateway: PaymentGatewayPort,
+) {}
+const secret = this.config.get("JWT_SECRET", { infer: true }); // typed `string`
+```
+
+**Why:** Untyped `ConfigService` and string DI tokens reintroduce silent `any` holes at configuration and port boundaries.
+**Not a violation when:** Using a strongly typed `ConfigType<typeof featureConfig>` registration via `registerAs(...)`.
+
+---
+
 ## TS-6xx — Modules, imports, conventions
 
 ### TS-601 — Deep relative import chains
@@ -755,6 +920,17 @@ the config level, not per import.
 **Detect:** `require()` mixed with `import` in the same project; `export default` in some
 modules and named exports in others with no rule; missing `.js` extensions under
 `module: NodeNext`.
+
+```ts
+// Bad
+const jwt = require("jsonwebtoken");
+export default class QuizService {}
+
+// Good
+import jwt from "jsonwebtoken";
+export class QuizService {}
+```
+
 **Why:** Mixed syntax breaks tree-shaking, confuses mocking in Jest, and produces
 ESM/CJS interop errors at runtime.
 **Not a violation when:** A config file must be CommonJS by tooling requirement.
@@ -765,6 +941,15 @@ ESM/CJS interop errors at runtime.
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Importing a symbol used only in type position without `import type`, when the
 project otherwise uses `import type`.
+
+```ts
+// Bad — under verbatimModuleSyntax, emits a runtime import for a type
+import { Request, Response } from "express";
+
+// Good
+import type { Request, Response } from "express";
+```
+
 **Why:** Under `isolatedModules`/`verbatimModuleSyntax`, unmarked type imports emit real
 runtime imports and can create import cycles.
 **Not a violation when:** The project does not use these flags and is consistent.
@@ -773,7 +958,17 @@ runtime imports and can create import cycles.
 
 ### TS-604 — Circular import between modules
 **Severity:** major · **Applies to:** `src/**/*.ts`
-**Detect:** A imports B and B imports A, directly or through a barrel `index.ts`.
+**Detect:** A imports B and B imports A, directly or through a barrel `index.ts` (pairs with `MA-301`).
+
+```ts
+// Bad — booking.service.ts <-> payment.service.ts cyclic import yields `undefined` at runtime
+// booking.service.ts: import { PaymentService } from "../payment/payment.service";
+// payment.service.ts: import { BookingService } from "../booking/booking.service";
+
+// Good — break the cycle via a domain event or a shared port interface
+// booking.service.ts emits "booking.confirmed"; payment listener subscribes asynchronously
+```
+
 **Why:** Cycles produce `undefined` at import time — a class that is defined when you read
 it and `undefined` when the process starts.
 **Not a violation when:** The cycle is type-only and marked with `import type`.
@@ -785,6 +980,17 @@ it and `undefined` when the process starts.
 **Detect:** Deviations from the project convention: `PascalCase` for types/classes/enums,
 `camelCase` for values and functions, `UPPER_SNAKE_CASE` for module-level constants,
 `kebab-case.ts` (or the project's consistent alternative) for filenames.
+
+```ts
+// Bad
+export interface user_profile { User_Id: string }
+export const max_retries = 3;
+
+// Good
+export interface UserProfile { userId: string }
+export const MAX_RETRIES = 3;
+```
+
 **Why:** Consistent casing is how a reader tells a type from a value at a glance without
 jumping to the definition.
 **Not a violation when:** The identifier mirrors an external API's casing.
@@ -795,6 +1001,36 @@ jumping to the definition.
 **Severity:** minor · **Applies to:** `src/**/index.ts`
 **Detect:** `export * from "./..."` across a whole module, especially one that also holds
 side-effectful initialisation.
+
+```ts
+// Bad — exposes repository, Mongoose model, and internal helpers as public API
+export * from "./booking.entity";
+export * from "./booking.repository";
+export * from "./booking.service";
+
+// Good — curated public surface only (see MA-202)
+export { BookingModule } from "./booking.module";
+export { BookingFacade } from "./booking.facade";
+export type { BookingSummaryDto } from "./dto/booking-summary.dto";
+```
+
 **Why:** Wildcard barrels create import cycles, defeat tree-shaking, and make every
 consumer look like it depends on the entire module.
 **Not a violation when:** The barrel is a small, curated public API of named exports.
+
+---
+
+### TS-607 — Uncontrolled deep import bypassing module or package public entrypoint
+**Severity:** minor · **Applies to:** `src/**/*.ts`, `libs/**/*.ts`
+**Detect:** Importing internal subpaths across module or monorepo package boundaries (`@modules/booking/infra/booking.repo`, `@enr/contracts/src/internal/helpers`) instead of the module/package public entrypoint (`@modules/booking`, `@enr/contracts`). Cross-references `MA-201`.
+
+```ts
+// Bad — bypasses module/package public API and couples to internal folder layout
+import { SlotHoldEntity } from "@modules/booking/entities/slot-hold.entity";
+
+// Good — import only from the module or workspace package public entrypoint
+import { BookingFacade, type SlotHoldSummary } from "@modules/booking";
+```
+
+**Why:** Deep subpath imports make internal refactoring impossible without breaking distant modules and silently bypass encapsulation.
+**Not a violation when:** The import is inside the same module directory, or the package explicitly documents subpath exports in `package.json` `"exports"`.

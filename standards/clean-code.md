@@ -178,6 +178,15 @@ distinction at the type level (`Attempt` vs `Submission` as separate types).
 casing that breaks the module's convention (`Question/` beside `quiz/`, `DataBase/` beside
 `config/`); `*.controlers.ts`-style typos.
 
+```text
+// Bad
+src/modules/Question/quiz.controlers.ts   # exports grading helpers and Mongoose schema
+
+// Good
+src/modules/question/question.controller.ts
+src/modules/question/question.service.ts
+```
+
 **Why:** Path conventions are how a reader navigates without grep. Inconsistent casing also
 breaks builds on case-sensitive CI filesystems even when it works on macOS.
 **Not a violation when:** The whole project consistently uses that convention.
@@ -191,6 +200,22 @@ breaks builds on case-sensitive CI filesystems even when it works on macOS.
 **Detect:** A function body over ~40 lines, or one that needs a scroll to read. Count
 statements, not blank lines. Pair this with CC-102 — length is a symptom, mixed
 responsibilities are the disease.
+
+```ts
+// Bad — 70-line inline checkout handler doing validation, pricing, locking, payment, and email
+async function checkout(dto: CheckoutDto) {
+  // ... 20 lines validating hold and computing fee ...
+  // ... 25 lines calling Stripe and updating ledger ...
+  // ... 25 lines building invoice HTML and sending email ...
+}
+
+// Good — short orchestrator delegating each phase to a cohesive collaborator
+async function checkout(dto: CheckoutDto): Promise<Receipt> {
+  const hold = await this.holdService.assertActive(dto.holdId, dto.userId);
+  const charge = await this.paymentGateway.charge(hold.totalPiastres, dto.paymentMethodId);
+  return this.bookingService.confirmFromCharge(hold.id, charge.id);
+}
+```
 
 **Why:** Length is the cheapest available proxy for "this does more than one thing".
 **Not a violation when:** The body is a flat, non-branching data mapping (a long object
@@ -401,6 +426,20 @@ async function findPublishedQuiz(id: string): Promise<Quiz> {
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Parameters never referenced in the body; constructor-injected services never
 used. Grep hint: enable `noUnusedParameters`, then read the compiler output.
+
+```ts
+// Bad
+constructor(
+  private readonly quizRepo: QuizRepository,
+  private readonly mailer: MailerService,   // never referenced anywhere in the class
+) {}
+
+// Good
+constructor(private readonly quizRepo: QuizRepository) {}
+// Express error middleware must keep 4 params — prefix unused ones with `_`:
+function errorMiddleware(err: unknown, _req: Request, res: Response, _next: NextFunction) { ... }
+```
+
 **Why:** A parameter nobody reads is a lie about what the function needs.
 **Not a violation when:** The signature is fixed by a framework contract — Express error
 middleware must declare four parameters. Prefix with `_` in that case.
@@ -430,15 +469,17 @@ whole graph to rebuild and retest.
 
 ## CC-2xx — Architecture and layering
 
-The dependency rule for this codebase:
+The dependency rule for this codebase (across both Express and NestJS stacks):
 
-```
-routes  ->  controller  ->  service  ->  repository  ->  model (Mongoose)
-                    \-> validation (schema)      \-> external adapters (mail, cache, storage)
+```text
+Express: routes -> controller -> service -> repository -> model (Mongoose)
+NestJS:  controller -> service / use-case -> repository -> ORM entity (TypeORM / Prisma)
+                                     \-> external adapters (mail, payment, cache, storage)
 ```
 
 Dependencies point one direction only. Nothing below the service layer may import from a
-controller. Domain logic must not import Express or Mongoose types.
+controller. Domain logic must not import Express, NestJS HTTP, or ORM/Mongoose types.
+For cross-module boundaries and folder topology, see [`modular-structure.md`](./modular-structure.md) (`MA-###`).
 
 ---
 
@@ -499,92 +540,99 @@ const doctors = await this.doctorRepository.findAvailable();
 ### CC-203 — Layer imported in the wrong direction
 **Severity:** critical · **Applies to:** `src/**/*.ts`
 **Detect:** A service, repository, model, or util importing a controller, a route module,
-or `express` types. Grep hint in `*.service.ts` / `*.repository.ts` / `models/`:
-`from "express"|\.controller|\.routes`
+`express` HTTP types, or NestJS `ExecutionContext` / HTTP decorators; a pure domain helper
+importing ORM query builders (`Repository`, `PrismaClient`). Grep hint in `*.service.ts` /
+`*.repository.ts` / `models/`: `from ["']express["']|\.controller|\.routes|ExecutionContext`
 
 ```ts
-// Bad — quiz.service.ts
+// Bad — quiz.service.ts / booking.service.ts
 import { Request, Response } from "express";
 async listQuizzes(req: Request, res: Response) { ... }
 
-// Good — quiz.service.ts
+// Good — quiz.service.ts / booking.service.ts
 async listQuizzes(filter: QuizFilter): Promise<Quiz[]> { ... }
 ```
 
 **Why:** Inverted dependencies destroy the layer boundary — the domain becomes unusable
 outside HTTP and untestable without a fake `req`/`res`.
-**Not a violation when:** The file is a controller, middleware, or the app bootstrap.
+**Not a violation when:** The file is a controller, middleware, guard/interceptor, or the app bootstrap.
 
 ---
 
 ### CC-204 — Cross-module reach-around
 **Severity:** major · **Applies to:** `src/modules/**`
-**Detect:** Module A importing module B's repository, model, or internal helper instead of
-B's public service. Grep hint: `from "\.\./[a-z-]+/(?!.*\.service)` inside `src/modules/`.
+**Detect:** Module A importing module B's repository, model, entity, or internal helper instead of
+B's public service or facade (pairs with `MA-201` and `MA-401`). Grep hint:
+`from "\.\./[a-z-]+/(?!.*\.(service|facade|public|module))` inside `src/modules/`.
 
 ```ts
-// Bad — attempt.service.ts
+// Bad — attempt.service.ts / booking.service.ts
 import { QuestionModel } from "../quiz/questions/question.model.js";
+// or in NestJS: injecting AvailabilityRepository inside BookingService
 
-// Good — attempt.service.ts
+// Good — attempt.service.ts / booking.service.ts
 import { quizService } from "../quiz/quiz.service.js";
 const questions = await quizService.getGradingSheet(quizId);
 ```
 
 **Why:** Reaching into another module's internals freezes those internals as a public API
-by accident.
+by accident and bypasses the owning module's invariants.
 **Not a violation when:** The import is from a shared `common/` module explicitly meant to
-be consumed by everyone.
+be consumed by everyone, or via the module's exported public facade.
 
 ---
 
 ### CC-205 — Framework or infrastructure types in the domain
 **Severity:** major · **Applies to:** `src/**/*.service.ts`, domain types, pure logic modules
-**Detect:** Domain functions accepting or returning `Request`, `Response`, `Document`,
-`ObjectId`, or a raw Mongoose model instance.
+**Detect:** Domain functions accepting or returning Express `Request`/`Response`, Mongoose
+`Document`/`ObjectId`, TypeORM `EntityManager`/`QueryRunner`, Prisma client types, or `RmqContext`.
 
 ```ts
 // Bad
 function calculateScore(attempt: HydratedDocument<Attempt>, req: Request): number
+function canRefund(manager: EntityManager, booking: BookingOrmEntity): boolean
 
 // Good
 function calculateScore(gradingSheet: GradingSheet, answers: SubmittedAnswer[]): Score
+function canRefund(now: Date, appointmentStart: Date): RefundEligibility
 ```
 
 **Why:** Pure domain functions are the cheapest thing in a codebase to test and the most
 expensive thing to lose. Infrastructure types make them neither.
 **Not a violation when:** The function is explicitly an adapter (repository, mapper,
-middleware).
+middleware, transport controller).
 
 ---
 
 ### CC-206 — Missing input validation at the HTTP boundary
-**Severity:** critical · **Applies to:** `src/**/*.routes.ts`, `src/**/*.controller.ts`
+**Severity:** critical · **Applies to:** `src/**/*.routes.ts`, `src/**/*.controller.ts`, `src/main.ts`
 **Detect:** `req.body`, `req.params`, or `req.query` flowing into a service or a query with
-no Zod/Joi schema or validation middleware on that route. Grep hint: routes with no
-`validate(`/`schema`/`ZodSchema`/`Joi.object` in the chain.
+no Zod/Joi schema or validation middleware on that route; in NestJS, missing global
+`ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true })` or un-decorated DTOs (`TS-507`).
+Grep hint: routes with no `validate(`/`schema`/`ZodSchema`/`Joi.object` in the chain, or `main.ts` missing `useGlobalPipes`.
 
 ```ts
-// Bad
+// Bad — Express route without validation middleware
 router.post("/quizzes", isAuthenticated, quizController.create);
-// controller: await this.quizService.create(req.body)
 
-// Good
+// Good — Express with Zod middleware
 router.post("/quizzes", isAuthenticated, validate(createQuizSchema), quizController.create);
-// controller: await this.quizService.create(req.validated.body)
+
+// Good — NestJS global ValidationPipe in main.ts
+app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
 ```
 
-**Why:** Unvalidated input reaching a Mongoose query is how mass-assignment and
-NoSQL-operator injection (`{ email: { $ne: null } }`) happen.
+**Why:** Unvalidated input reaching a database query or service is how mass-assignment,
+type-confusion bugs, and NoSQL-operator injection (`{ email: { $ne: null } }`) happen.
 **Not a violation when:** The handler takes no input, or validation demonstrably runs in a
-router-level middleware applied to the whole subtree.
+router-level or global pipe applied to the whole subtree.
 
 ---
 
 ### CC-207 — Authorization decided ad hoc inside a handler
 **Severity:** critical · **Applies to:** `src/**/*.controller.ts`, `src/**/*.service.ts`
 **Detect:** Inline `if (req.user.role === "admin")` checks scattered across handlers instead
-of a named guard, or an admin-only route with no role check at all.
+of a named guard (`authorize(...)`, `@UseGuards(JwtAuthGuard, RolesGuard)`), or a privileged route with no role check at all.
 
 ```ts
 // Bad
@@ -593,8 +641,14 @@ async deleteQuiz(req: Request, res: Response) {
   ...
 }
 
-// Good
+// Good — Express
 router.delete("/quizzes/:id", isAuthenticated, authorize(Role.Admin), quizController.delete);
+
+// Good — NestJS
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.Admin)
+@Delete(":id")
+deleteQuiz(@Param("id", ParseUUIDPipe) id: string) { ... }
 ```
 
 **Why:** Scattered checks are impossible to audit; the one handler that forgets is the breach.
@@ -607,8 +661,22 @@ belongs in the service, expressed as a named policy function.
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** A module that both defines a class and eagerly constructs it with concrete
 dependencies at import time, when other modules need to inject fakes.
+
+```ts
+// Bad — concrete dependency hard-wired at import time; impossible to swap in tests
+export class QuizService {
+  private readonly repo = new QuizRepository();
+}
+export const quizService = new QuizService();
+
+// Good — constructor injection; composition root wires concrete instances
+export class QuizService {
+  constructor(private readonly repo: QuizRepositoryPort) {}
+}
+```
+
 **Why:** Import-time construction makes the dependency graph implicit and unit tests need
-`jest.mock` gymnastics to substitute anything.
+`jest.mock` gymnastics to substitute anything (see `MA-602`).
 **Not a violation when:** The project consistently uses module-level singletons and the
 constructor still accepts its dependencies (so tests can build their own instance).
 
@@ -688,6 +756,17 @@ array indices).
 **Detect:** A generic base class, options bag, or "engine" with exactly one caller;
 `if (options.mode === ...)` branches nobody triggers; config flags with a single value.
 
+```ts
+// Bad — generic base repository + strategy factory for a single entity
+export abstract class BaseCrudService<T, CreateDto, UpdateDto, FilterDto> { ... }
+export class QuizService extends BaseCrudService<Quiz, CreateQuizDto, UpdateQuizDto, QuizFilterDto> {}
+
+// Good — plain cohesive service; extract only when a second caller genuinely shares the contract
+export class QuizService {
+  constructor(private readonly quizRepo: QuizRepository) {}
+}
+```
+
 **Why:** YAGNI. A wrong abstraction costs more than the duplication it prevented, because
 it must be unwound before anything can change.
 **Not a violation when:** A second real caller exists today.
@@ -699,6 +778,17 @@ it must be unwound before anything can change.
 **Detect:** Hand-rolled deep clone, `Object.keys().forEach` where `Object.entries().map`
 reads better, custom email regex where a validation schema is already in use, hand-written
 date arithmetic where `dayjs` is already a dependency.
+
+```ts
+// Bad — hand-rolled clone & custom email regex when Zod and structuredClone exist
+const copy = JSON.parse(JSON.stringify(payload));
+const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+// Good
+const copy = structuredClone(payload);
+const email = z.string().email().parse(rawEmail);
+```
+
 **Why:** Hand-rolled versions of solved problems carry edge-case bugs that nobody tests for.
 **Not a violation when:** The dependency is not already installed and adding it for this
 one use is heavier than the ten lines it replaces.
@@ -742,13 +832,13 @@ that build HTTP responses; the same "something went wrong" envelope repeated eve
 // Bad
 catch (error) { res.status(500).json({ success: false, message: "Something went wrong" }); }
 
-// Good
-catch (error) { next(error); }   // one Express error middleware maps AppError -> status + body
+// Good — Express central error middleware / NestJS global ExceptionFilter
+catch (error) { next(error); }   // Express error middleware or NestJS @Catch() filter maps error -> status + envelope
 ```
 
 **Why:** Central handling is the only way to keep response shape, logging, and status
 mapping consistent — and the only place to guarantee stack traces never leak.
-**Not a violation when:** The file *is* the central error middleware.
+**Not a violation when:** The file *is* the central error middleware or global `ExceptionFilter`.
 
 ---
 
@@ -814,6 +904,17 @@ catch (error) {
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Everything thrown as a generic `Error`, so the middleware cannot distinguish
 400 from 404 from 500 and defaults everything to 500.
+
+```ts
+// Bad
+if (!quiz) throw new Error("Quiz not found");
+if (attempt.isSubmitted) throw new Error("Already submitted");
+
+// Good
+if (!quiz) throw new NotFoundError(`quiz ${id}`);
+if (attempt.isSubmitted) throw new ConflictError(`attempt ${attempt.id} already submitted`);
+```
+
 **Why:** Status mapping should follow from the error type, not from string matching on messages.
 **Not a violation when:** A typed error hierarchy exists and is used.
 
@@ -876,16 +977,16 @@ Responsibility per layer:
 
 | Layer | `try/catch`? | Responsibility |
 | --- | --- | --- |
-| Controller | No — wrap in `asyncHandler` / `asyncWrap` | map request → DTO → service → response |
-| Service | Only for the four reasons above | throw typed domain errors |
-| Repository | Only to translate driver errors | keep Mongoose behind the boundary |
-| Error middleware | Yes — the one that matters | map domain error → status + envelope, log unknowns |
+| Controller | No — wrap in `asyncHandler` / `asyncWrap` (or let NestJS catch) | map request → DTO → service → response |
+| Service | Only for the four reasons above | throw typed domain errors (`AppError` / `HttpException`) |
+| Repository | Only to translate driver errors (`11000`, `23505`) | keep Mongoose / TypeORM / Prisma behind the boundary |
+| Error middleware / `ExceptionFilter` | Yes — the one that matters | map domain error → status + envelope, log unknowns |
 
 **Why:** Catching everywhere produces the failures in `CC-401` (swallowed), `CC-402`
 (duplicated response building), and `CC-406` (status collapsed to 500). Catching in one place
 means status mapping, logging, and response shape have exactly one definition.
 **Not a violation when:** The catch does one of the four jobs above, or the file is the
-central error middleware.
+central error middleware / global `ExceptionFilter`.
 
 > **Express 4 caveat:** a rejected promise from an `async` handler or middleware does **not**
 > reach the error middleware. Every async handler must be wrapped (`asyncHandler`), or the
@@ -899,17 +1000,21 @@ central error middleware.
 ### CC-501 — Missing `await` on a promise
 **Severity:** critical · **Applies to:** `src/**/*.ts`
 **Detect:** A call to an async function used as a statement with no `await`, no `return`,
-and no `.catch`. Grep hint: statement lines calling `Model.`, `repository.`, `service.`,
-`.save()`, `.send()` without `await`. Enable `@typescript-eslint/no-floating-promises`.
+and no `.catch`. Watch especially for `user.save()`, `mailer.send*()`, `eventEmitter.emitAsync(...)`,
+`queue.add(...)`, and `queryRunner.release()`. Grep hint: statement lines calling `Model.`,
+`repository.`, `service.`, `.save()`, `.send()`, `.emitAsync(`, `.release()` without `await`.
+Enable `@typescript-eslint/no-floating-promises`.
 
 ```ts
 // Bad
 user.save();                       // fire and forget — caller "succeeds" before the write lands
 this.mailer.sendConfirmation(user);
+this.eventEmitter.emitAsync("booking.confirmed", event);
 
 // Good
 await user.save();
 await this.mailer.sendConfirmation(user);
+await this.eventEmitter.emitAsync("booking.confirmed", event);
 ```
 
 **Why:** A floating promise means the response can be sent before the work happens, and a
@@ -965,8 +1070,21 @@ result type reflects it.
 
 ### CC-504 — Multi-step write with no transaction or compensation
 **Severity:** major · **Applies to:** `src/**/*.service.ts`, `src/**/*.repository.ts`
-**Detect:** Two or more dependent writes across collections with no session/transaction and
-no rollback path (create attempt → decrement quota → write audit).
+**Detect:** Two or more dependent writes across collections or tables with no session/transaction
+and no rollback path (create attempt → decrement quota → write audit).
+
+```ts
+// Bad — if creditDebit fails or crashes, booking exists without payment ledger
+await this.bookingRepo.markPaid(bookingId);
+await this.ledgerRepo.recordDebit(userId, amountPiastres);
+
+// Good — atomic DB transaction across both writes
+await this.dataSource.transaction(async (manager) => {
+  await this.bookingRepo.markPaid(bookingId, manager);
+  await this.ledgerRepo.recordDebit(userId, amountPiastres, manager);
+});
+```
+
 **Why:** A crash between writes leaves the database in a state no code path expects.
 **Not a violation when:** The writes are independent, or the second step is idempotent and
 retried by design.
@@ -977,6 +1095,16 @@ retried by design.
 **Severity:** major · **Applies to:** `src/**/*.ts`
 **Detect:** `*Sync` filesystem calls, `bcrypt.hashSync`, `JSON.parse` on large uploads, or
 tight loops over full collections inside a handler. Grep hint: `Sync\(`
+
+```ts
+// Bad — stalls the single Node.js event loop for every concurrent request
+const hash = bcrypt.hashSync(dto.password, 12);
+const template = fs.readFileSync(templatePath, "utf8");
+
+// Good — non-blocking async I/O and worker-pool crypto
+const hash = await bcrypt.hash(dto.password, 12);
+const template = await fs.promises.readFile(templatePath, "utf8");
+```
 
 **Why:** One event loop. Blocking it stalls every concurrent request, not just this one.
 **Not a violation when:** The code runs at startup or in a script/CLI entrypoint.
@@ -1041,12 +1169,80 @@ await this.dataSource.transaction(async (manager) => {
 
 ---
 
+### CC-508 — Unreleased resource, transaction runner, or timer/listener leak
+**Severity:** major · **Applies to:** `src/**/*.ts`
+**Detect:** Manual `queryRunner.connect()` / `startTransaction()`, `mongoose.startSession()`, file/DB streams, `setInterval`, or per-request `emitter.on(...)` without guaranteed cleanup in `finally` or `onModuleDestroy`. Grep hint: `createQueryRunner\(|startSession\(|setInterval\(`.
+
+```ts
+// Bad — queryRunner leaks from the pool whenever commit or query throws
+const queryRunner = this.dataSource.createQueryRunner();
+await queryRunner.connect();
+await queryRunner.startTransaction();
+await queryRunner.manager.save(booking);
+await queryRunner.commitTransaction();
+await queryRunner.release();
+
+// Good — release in finally (or prefer dataSource.transaction(...) callback)
+const queryRunner = this.dataSource.createQueryRunner();
+await queryRunner.connect();
+await queryRunner.startTransaction();
+try {
+  await queryRunner.manager.save(booking);
+  await queryRunner.commitTransaction();
+} catch (error) {
+  await queryRunner.rollbackTransaction();
+  throw error;
+} finally {
+  await queryRunner.release();
+}
+```
+
+**Why:** Leaked connection runners, open cursors, and uncleaned timers exhaust the database pool or heap under load and silently hang process shutdown.
+**Not a violation when:** Using managed callbacks (`dataSource.transaction(...)`, `session.withTransaction(...)`) or cleaning up inside NestJS `OnModuleDestroy`.
+
+---
+
+### CC-509 — Outbound network call without an explicit timeout
+**Severity:** major · **Applies to:** `src/**/*.ts`
+**Detect:** `fetch(...)`, `axios.*`, LLM SDK calls, SMTP transports, or webhook deliveries without an explicit `signal: AbortSignal.timeout(...)` or client `timeout` setting. Grep hint: `fetch\(|axios\.(get|post|put|request)\(`.
+
+```ts
+// Bad — hangs indefinitely if the third-party API stalls on TCP read
+const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
+
+// Good — bounded deadline with AbortSignal.timeout
+const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  method: "POST",
+  body: JSON.stringify(payload),
+  signal: AbortSignal.timeout(5_000),
+});
+```
+
+**Why:** An un-bounded HTTP call ties up request workers, memory, and upstream callers until OS TCP timeouts (often minutes) fire, turning a slow dependency into a full outage.
+**Not a violation when:** The underlying HTTP client instance is centrally configured with a strict default timeout (e.g. `axios.create({ timeout: 5_000 })`).
+
+---
+
 ## CC-6xx — Comments, dead code, noise
 
 ### CC-601 — Commented-out code
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Blocks of `//` lines containing statements. Grep hint:
 `^\s*//\s*(const|let|await|return|if|await|res\.|this\.)`
+
+```ts
+// Bad
+// const legacyFee = doctor.fee * 1.1;
+// if (legacyFee > 500) return legacyFee;
+const feePiastres = doctor.consultationFeePiastres;
+
+// Good
+const feePiastres = doctor.consultationFeePiastres;
+```
+
 **Why:** Version control already remembers. Commented code rots and misleads.
 **Not a violation when:** It is an illustrative example inside documentation prose.
 
@@ -1075,6 +1271,15 @@ public API docstring.
 ### CC-603 — Stale `TODO`/`FIXME` with no owner or issue
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** `TODO`, `FIXME`, `HACK`, `XXX` without a ticket reference.
+
+```ts
+// Bad
+// TODO: fix race condition here later
+
+// Good
+// TODO(#412): replace advisory lock with partial unique index once migration 009 lands
+```
+
 **Why:** An unowned TODO is a wish, not a plan.
 **Not a violation when:** It links an issue (`TODO(#412): ...`).
 
@@ -1084,6 +1289,15 @@ public API docstring.
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Exports nobody imports, unreachable branches after `return`/`throw`, feature
 flags permanently false, `*.old.ts` / `*.backup.ts` files.
+
+```ts
+// Bad
+export function legacyCalculateDiscount(amount: number): number { return amount * 0.9; } // 0 callers
+if (false) { await seedTestDoctors(); }
+
+// Good — delete unused helpers and unreachable branches; rely on git history if ever needed
+```
+
 **Why:** Dead code is read, maintained, and refactored at full cost for zero value.
 **Not a violation when:** It is a public library export or a documented extension point.
 
@@ -1119,10 +1333,12 @@ up in log aggregators.
 // Bad — auth.service.ts
 const token = jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: process.env.JWT_TTL });
 
-// Good — config/env.ts validates once at boot
+// Good — Express: config/env.ts validates once at boot
 export const env = envSchema.parse(process.env);
-// auth.service.ts
 const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: env.JWT_TTL });
+
+// Good — NestJS: validated ConfigModule + typed ConfigService<Env, true>
+const secret = this.configService.get("JWT_SECRET", { infer: true });
 ```
 
 **Why:** Scattered env reads mean the app boots successfully and fails later, in one
@@ -1135,6 +1351,15 @@ endpoint, in production. Validate once, fail at startup, type the result.
 **Severity:** critical · **Applies to:** all tracked files
 **Detect:** Literal JWT secrets, API keys, database URIs with passwords, SMTP credentials,
 default fallbacks like `process.env.JWT_SECRET || "secret"`, committed `.env`.
+
+```ts
+// Bad — fallback string becomes a publicly known signing key in production
+const secret = process.env.JWT_SECRET || "dev-secret-key";
+
+// Good — required in boot-time env validation; zero hardcoded fallback
+const envSchema = z.object({ JWT_SECRET: z.string().min(32) });
+```
+
 **Why:** Committed secrets are permanently compromised — rotation is the only fix.
 **Not a violation when:** It is an obvious placeholder in `.env.example`.
 
@@ -1164,6 +1389,15 @@ percentage conversion right beside the word `percent`).
 **Severity:** minor · **Applies to:** `src/**/*.ts`
 **Detect:** Status/role values compared as raw strings across files (`"passed"`, `"admin"`,
 `"pending"`) with no enum or union type.
+
+```ts
+// Bad
+if (booking.status === "confimed") { ... }   // silent typo never flagged by TypeScript
+
+// Good
+if (booking.status === BookingStatus.Confirmed) { ... }
+```
+
 **Why:** A typo in one comparison is a silent branch that never runs. See `TS-203`.
 **Not a violation when:** The value comes from an external system and is deliberately
 opaque.
@@ -1222,6 +1456,17 @@ keys and the write uses the parsed object.
 ### CC-803 — Unbounded query or missing pagination
 **Severity:** major · **Applies to:** `src/**/*.repository.ts`, `src/**/*.service.ts`
 **Detect:** `find({})` with no `limit`, or a client-supplied `limit` with no ceiling.
+
+```ts
+// Bad — dumps entire table or lets client request ?limit=10000000
+return this.doctorRepo.find({ where: { isActive: true }, take: query.limit });
+
+// Good — enforced ceiling on every collection query
+const MAX_PAGE_SIZE = 100;
+const limit = Math.min(Math.max(query.limit ?? 20, 1), MAX_PAGE_SIZE);
+return this.doctorRepo.find({ where: { isActive: true }, take: limit, skip: (page - 1) * limit });
+```
+
 **Why:** One collection scan or a `?limit=1000000` request is a denial of service that
 needs no attacker.
 **Not a violation when:** The collection is bounded by design (roles, config docs).
@@ -1232,6 +1477,19 @@ needs no attacker.
 **Severity:** critical · **Applies to:** `src/**/*.ts`
 **Detect:** Passwords, OTPs, or tokens in log calls or error messages; plain `===`
 comparison of a secret/OTP; a password field without `select: false` in the schema.
+
+```ts
+// Bad
+logger.info({ email, otp }, "verifying OTP");
+if (user.otpHash === submittedOtpHash) { ... }
+
+// Good — omit/redact secrets from logs and compare fixed-length digests in constant time
+logger.info({ userId: user.id }, "verifying OTP");
+const isValid =
+  submittedBuf.length === expectedBuf.length &&
+  crypto.timingSafeEqual(submittedBuf, expectedBuf);
+```
+
 **Why:** Logs are read by more people than the database; naive comparison of secrets leaks
 timing and lands the value in stack traces.
 **Not a violation when:** The value is redacted at the logger level and the redaction is
@@ -1243,6 +1501,17 @@ demonstrably configured.
 **Severity:** major · **Applies to:** `src/**/*.service.ts`
 **Detect:** A rule ("cannot submit an attempt twice", "cannot start an unpublished quiz")
 enforced in one endpoint but missing on a second path that reaches the same state.
+
+```ts
+// Bad — cancel check exists in patientCancel(), omitted in adminBulkCancel()
+async adminBulkCancel(bookingIds: string[]) {
+  await this.bookingRepo.markCancelled(bookingIds); // cancels already-completed bookings
+}
+
+// Good — invariant lives inside the domain transition method shared by all callers
+booking.cancel(reason, now); // throws ConflictException if status !== Confirmed
+```
+
 **Why:** An invariant enforced in some paths is not an invariant. Put it in the service or
 the schema, where every path passes.
 **Not a violation when:** The database enforces it (unique index, required field) and the
@@ -1328,4 +1597,63 @@ async handleBookingConfirmed(event: BookingConfirmedEvent) {
 
 **Why:** In distributed and event-driven architectures, at-least-once delivery is the standard contract. Duplicate event deliveries, retry policies, or consumer reboots without idempotency guarantees will charge users multiple times or spam them with repeated notifications.
 **Not a violation when:** The event handler performs an inherently idempotent operation (e.g., an unconditional cache invalidation or `SET key = value`).
+
+---
+
+### CC-809 — Client-supplied financial, pricing, or deadline authority trusted
+**Severity:** critical · **Applies to:** `src/**/*.controller.ts`, `src/**/*.service.ts`
+**Detect:** Persisting or charging `req.body.price`, `dto.totalAmount`, `dto.discount`, `dto.refundAmount`, `dto.isAdmin`, or `dto.submittedAt` directly instead of computing them server-side from authoritative records and the server clock.
+
+```ts
+// Bad — attacker sends { amountPiastres: 100 } for a 500 EGP consultation
+const charge = await this.paymentGateway.charge(dto.amountPiastres, dto.cardToken);
+
+// Good — resolve fee and deadlines strictly from server-owned records and server clock
+const doctor = await this.doctorRepo.findByIdOrThrow(hold.doctorId);
+const totalPiastres = this.pricingPolicy.calculateTotal(doctor.consultationFeePiastres, promo);
+const charge = await this.paymentGateway.charge(totalPiastres, dto.cardToken);
+```
+
+**Why:** Any field originating in the client payload can be forged with curl. Prices, fees, roles, and submission timestamps belong exclusively to the server.
+**Not a violation when:** An authorized admin/operations endpoint explicitly overrides a catalog price or manually issues a bounded adjustment, and the role + audit trail are enforced.
+
+---
+
+### CC-810 — Wall-clock or timezone ambiguity in domain deadlines
+**Severity:** major · **Applies to:** `src/**/*.service.ts`, domain policies
+**Detect:** Parsing bare date strings (`new Date("2026-08-03")`, `new Date(\`\${date} \${time}\`)`) without an explicit offset or IANA timezone (`Africa/Cairo`), or using server-local `.getHours()` / `.setHours(0, 0, 0, 0)` for clinic schedules, exam timers, or 24-hour cancellation cutoffs.
+
+```ts
+// Bad — interprets clinic schedule in whatever TZ the container OS happens to run in
+const slotStart = new Date(`${dto.date}T${dto.startTime}`);
+const hoursUntilStart = (slotStart.getTime() - Date.now()) / 3_600_000;
+
+// Good — convert clinic wall-clock explicitly using the clinic IANA zone and compare UTC instants
+const slotStartUtc = zonedTimeToUtc(`${dto.date}T${dto.startTime}`, "Africa/Cairo");
+const isFreeCancel = slotStartUtc.getTime() - nowUtc.getTime() >= 24 * 60 * 60 * 1000;
+```
+
+**Why:** Local development machines (`Africa/Cairo`, UTC+2/+3) and CI/cloud containers (`UTC`) interpret bare timestamps differently, shifting cancellation cutoffs and slot windows by hours.
+**Not a violation when:** All inputs are ISO-8601 UTC instants (`...Z`) and arithmetic uses UTC epoch milliseconds only.
+
+---
+
+### CC-811 — Dual write instead of transactional outbox for cross-boundary domain events
+**Severity:** critical · **Applies to:** `src/**/*.service.ts` in event-driven systems
+**Detect:** Committing a database transaction (or saving an entity) and then immediately publishing to RabbitMQ/BullMQ/Kafka outside the transaction (`await repo.save(...); await rmq.emit(...)`) with no outbox row written in the same transaction.
+
+```ts
+// Bad — process crash or broker blip after save() loses the event forever
+await this.bookingRepo.confirm(bookingId);
+await this.rabbitClient.emit("booking.confirmed", payload);
+
+// Good — write state change and outbox event atomically in one database transaction
+await this.dataSource.transaction(async (manager) => {
+  await this.bookingRepo.confirm(bookingId, manager);
+  await this.outboxRepo.enqueue("booking.confirmed", payload, manager);
+});
+```
+
+**Why:** You cannot atomically commit to PostgreSQL and RabbitMQ without two-phase commit. A dual write silently produces orphaned state when either side fails (see `CC-807`, `CC-808`, `MS-351`).
+**Not a violation when:** The emitted event is a non-critical in-process metric/telemetry hook where best-effort delivery is explicitly acceptable and documented.
 
