@@ -35,6 +35,7 @@ The repository serves two primary functions:
 │   │   └── sprint-4-engagement-stories.md # Notifications, AI assistant, prescriptions
 │   ├── git-github-guide.md            # Git & collaboration engineering handbook
 │   ├── readme-guide.md                # Documentation & style guide handbook
+│   ├── student-grading-guide.md       # Student grading & Evaluation Google Sheet agent guide
 │   └── design-patterns-session.md     # Design patterns training materials
 ├── feedback/                          # Generated feedback for students
 │   ├── README.md                      # Cohort-wide summary & cross-team benchmarks
@@ -117,6 +118,11 @@ Structure every team feedback file using this standard template:
 - Compare all teams in a side-by-side comparison matrix.
 - Highlight common anti-patterns across the cohort to inform upcoming mentor workshops.
 - Curate a **"Cross-Team Reference Implementations"** table linking to the cleanest solutions written by students.
+
+### Step 6: Student Grading & Evaluation Spreadsheet
+- Follow [`docs/student-grading-guide.md`](./student-grading-guide.md) strictly when evaluating individual students and updating the cohort `Evaluation` Google Sheet:
+  - Reconcile `Students Data` → `Students Sync`, score contributions by actual backend code authored (never commit count), redistribute/drop non-applicable deliverables when requested, clean placeholder values on ungraded tabs, and verify zero formula errors (`#ERROR!`, `#DIV/0!`) after writing.
+  - Record the full evidence-backed breakdown in `<cohort>/feedback/students-evaluation.md`.
 
 ---
 

@@ -46,3 +46,4 @@ Four sprints of user stories, each with a `.csv` of the same stories ready to im
 - [`design-patterns-session.md`](./design-patterns-session.md) — design patterns session material
 - [`git-github-guide.md`](./git-github-guide.md) — git, GitHub and version control handbook: commits, branching, pull requests, code review, releases
 - [`readme-guide.md`](./readme-guide.md) — README handbook: what belongs in a README, and how to design and document the repo's coding style guide
+- [`student-grading-guide.md`](./student-grading-guide.md) — student evaluation & Google Sheets grading handbook: actual-code authorship audits, deliverables rubric, exact cell maps, formulas, and `gsheets` CLI rules
